@@ -24,6 +24,13 @@
 
 ---
 
+## 📱 Aplicativo Mobile & Play Store Note
+
+> [!NOTE]
+> **Status da Aplicação Móvel**: A aplicação móvel Android está completamente projetada e configurada, mas **ainda não está disponível na Google Play Store** (atualmente em compilações de testes privados).
+
+---
+
 ## 🌟 Executive Overview / Visão Geral
 
 **NetGene OS** is a next-generation distributed operating system architecture engineered completely in **Rust**. Operating at the **1.0.0 Apex Megastructure** tier, NetGene OS bridges low-level Linux eBPF networking, post-quantum cryptographic vaults, local LLM multi-agent decision loops, and simulated quantum optimization (QAOA/SQA) into a cohesive, self-healing system.
