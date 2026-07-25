@@ -1,0 +1,8 @@
+﻿cargo :    Compiling netgene-cli v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-cli)
+At line:1 char:1
++ cargo build --workspace 2>&1 | Out-File -FilePath "build_full.txt" -E ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ne...es\netgene-cli):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.96s

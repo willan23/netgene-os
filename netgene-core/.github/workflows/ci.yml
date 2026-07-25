@@ -1,0 +1,36 @@
+name: NetGene OS CI/CD
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    name: Build & Test (Linux & Windows)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo Check Workspace
+        run: cargo check --workspace
+
+      - name: Cargo Test Workspace
+        run: cargo test --workspace
+
+      - name: Cargo Build Release
+        run: cargo build --workspace --release

@@ -1,0 +1,123 @@
+[workspace]
+members = [
+    "crates/netgene-gene",
+    "crates/netgene-kernel",
+    "crates/netgene-quantum",
+    "crates/netgene-safeguard",
+    "crates/netgene-builder",
+    "crates/netgene-tui",
+    "crates/netgene-cli",
+    # Phase 2
+    "crates/netgene-store",
+    "crates/netgene-llm",
+    "crates/netgene-p2p",
+    # Phase 3
+    "crates/netgene-neural",
+    # Phase 4
+    "crates/netgene-wasm",
+    "crates/netgene-ebpf",
+    # Apex Megastructure (Phases 5 - 8)
+    "crates/netgene-k8s",
+    "crates/netgene-qpu",
+    "crates/netgene-mobile",
+    "crates/netgene-dao", "crates/netgene-cloud", "crates/netgene-lite", "crates/netgene-vault", "crates/netgene-tpm",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+authors = ["NetGene OS <netgene@core.io>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/netgene/netgene-core"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bincode = "1"
+
+# Cryptography
+ring = "0.17"
+sha3 = "0.10"
+zeroize = { version = "1.8", features = ["derive"] }
+hex = "0.4"
+base64 = "0.22"
+
+# Unique IDs
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "color", "env"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Logging & tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async trait
+async-trait = "0.1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Math / quantum simulation
+nalgebra = "0.33"
+petgraph = "0.6"
+rand = "0.8"
+rand_distr = "0.4"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP client (for Ollama)
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Persistence (sled embedded DB)
+sled = "0.34"
+
+# P2P networking (libp2p)
+libp2p = { version = "0.54", features = [
+    "tokio",
+    "tcp",
+    "noise",
+    "yamux",
+    "identify",
+    "gossipsub",
+    "kad",
+    "mdns",
+    "ping",
+    "macros",
+    "request-response",
+] }
+
+# Hashing
+dashmap = "6"
+lru = "0.12"
+
+# Internal crates
+netgene-gene      = { path = "crates/netgene-gene" }
+netgene-kernel    = { path = "crates/netgene-kernel" }
+netgene-quantum   = { path = "crates/netgene-quantum" }
+netgene-safeguard = { path = "crates/netgene-safeguard" }
+netgene-builder   = { path = "crates/netgene-builder" }
+netgene-tui       = { path = "crates/netgene-tui" }
+netgene-store     = { path = "crates/netgene-store" }
+netgene-llm       = { path = "crates/netgene-llm" }
+netgene-p2p       = { path = "crates/netgene-p2p" }
+netgene-neural    = { path = "crates/netgene-neural" }
+netgene-wasm      = { path = "crates/netgene-wasm" }
+netgene-ebpf      = { path = "crates/netgene-ebpf" }
+netgene-k8s       = { path = "crates/netgene-k8s" }
+netgene-qpu       = { path = "crates/netgene-qpu" }
+netgene-mobile    = { path = "crates/netgene-mobile" }
+netgene-dao       = { path = "crates/netgene-dao" }

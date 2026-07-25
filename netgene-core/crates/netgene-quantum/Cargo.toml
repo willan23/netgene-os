@@ -1,0 +1,20 @@
+[package]
+name = "netgene-quantum"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene Quantum Enhancement Module — Quantum-inspired optimization"
+
+[dependencies]
+tokio = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+nalgebra = { workspace = true }
+petgraph = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+tracing = { workspace = true }

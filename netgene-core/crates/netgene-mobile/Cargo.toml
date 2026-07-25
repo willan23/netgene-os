@@ -1,0 +1,16 @@
+[package]
+name = "netgene-mobile"
+version = "0.7.0"
+edition = "2021"
+description = "Mobile PWA Live Bridge & Biometric Passkey Engine for NetGene OS"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+base64 = { workspace = true }
+netgene-gene = { workspace = true }

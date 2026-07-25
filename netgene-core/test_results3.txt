@@ -1,0 +1,301 @@
+﻿cargo :    Compiling netgene-llm v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-llm)
+At line:1 char:1
++ cargo test --workspace 2>&1 | Out-File -FilePath "test_results3.txt"  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ne...es\netgene-llm):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   Compiling netgene-builder v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-builder)
+   Compiling netgene-safeguard v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-safeguard)
+   Compiling netgene-kernel v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-kernel)
+   Compiling netgene-neural v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-neural)
+   Compiling netgene-tui v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-tui)
+   Compiling netgene-cli v0.2.0 (W:\NetGene OS\netgene-core\crates\netgene-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.19s
+     Running unittests src\lib.rs (target\debug\deps\netgene_builder-6c36662d2ddeac1f.exe)
+
+running 8 tests
+test tests::test_node_template_display ... ok
+test tests::test_node_config_contains_zero_trust ... ok
+test tests::test_provision_single_edge_node ... ok
+test tests::test_from_intent_defaults_to_edge ... ok
+test tests::test_from_intent_gateway ... ok
+test tests::test_from_intent_quantum ... ok
+test tests::test_provision_multiple_nodes ... ok
+test tests::test_list_grows_with_provisioning ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.17s
+
+     Running unittests src\main.rs (target\debug\deps\netgene-4bd2d26f560e2195.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_dao-dd12bebe2c93dc51.exe)
+
+running 3 tests
+test tests::test_dao_proposal_and_voting ... ok
+test tests::test_proof_of_utility_reward ... ok
+test tests::test_dao_double_voting_prevention ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_ebpf-1ad87851ab3f0d1b.exe)
+
+running 1 test
+test probe::tests::test_ebpf_probe_sampling ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_gene-f90d6a664a9d102e.exe)
+
+running 7 tests
+test crypto::tests::test_fingerprint ... ok
+test identity::tests::test_master_gene_generation ... ok
+test identity::tests::test_revoke ... ok
+test token::tests::test_issue_and_verify ... ok
+test token::tests::test_expired_token_fails ... ok
+test identity::tests::test_spawn_sub_gene ... ok
+test crypto::tests::test_keygen_and_sign ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_k8s-bf674d6bbce6b164.exe)
+
+running 1 test
+test tests::test_crd_manifest_generation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_kernel-414877f800d36583.exe)
+
+running 12 tests
+test intent::tests::test_parse_quantum ... ok
+test intent::tests::test_parse_spawn_node ... ok
+test intent::tests::test_parse_optimize ... ok
+test intent::tests::test_parse_status ... ok
+test tests::test_kernel_boot_has_five_agents ... ok
+test tests::test_kernel_memory_store_and_retrieve ... ok
+test tests::test_kernel_memory_log_event ... ok
+test tests::test_kernel_dispatch_spawn_intent ... ok
+test tests::test_kernel_dispatch_unknown_intent ... ok
+test tests::test_kernel_shutdown ... ok
+test tests::test_kernel_dispatch_optimize_intent ... ok
+test tests::test_kernel_memory_search_by_tag ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_llm-2f1bafb32e3d391a.exe)
+
+running 6 tests
+test tests::test_fallback_anomaly_scan ... ok
+test tests::test_fallback_create_gateway ... ok
+test tests::test_fallback_route_optimization_without_count ... ok
+test tests::test_fallback_provision_nodes ... ok
+test tests::test_fallback_system_status ... ok
+test tests::test_fallback_optimize_network ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.45s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_mobile-b9524242e14d91e5.exe)
+
+running 1 test
+test tests::test_passkey_challenge_generation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_neural-0e86ae48d8820c80.exe)
+
+running 1 test
+test stream::tests::test_neural_signal_processing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_p2p-8ebff6f48a10ea72.exe)
+
+running 4 tests
+test events::tests::test_mesh_message_healing_broadcast_roundtrip ... ok
+test events::tests::test_mesh_message_intent_broadcast_roundtrip ... ok
+test events::tests::test_mesh_message_node_announce_roundtrip ... ok
+test events::tests::test_mesh_message_anomaly_alert_roundtrip ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_qpu-10fce369fe14a0ed.exe)
+
+running 1 test
+test tests::test_openqasm_transpilation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_quantum-30208cce7c0a4ac8.exe)
+
+running 4 tests
+test graph::tests::test_demo_topology ... ok
+test qaoa::tests::test_qaoa_small_problem ... ok
+test annealing::tests::test_annealing ... ok
+test graph::tests::test_quantum_route ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_safeguard-9970ae937caa377e.exe)
+
+running 18 tests
+test anomaly::tests::test_anomaly_event_display_severity ... ok
+test anomaly::tests::test_insufficient_data_returns_none ... ok
+test anomaly::tests::test_no_anomaly_for_normal_values ... ok
+test anomaly::tests::test_critical_count ... ok
+test anomaly::tests::test_events_accumulate ... ok
+test anomaly::tests::test_severity_critical_on_extreme_spike ... ok
+test anomaly::tests::test_anomaly_detected_on_spike ... ok
+test anomaly::tests::test_recent_events_limit ... ok
+test healing::tests::test_evaluate_critical_isolates_node ... ok
+test healing::tests::test_evaluate_high_reroutes_traffic ... ok
+test healing::tests::test_evaluate_low_sends_alert ... ok
+test healing::tests::test_evaluate_medium_scales_up ... ok
+test healing::tests::test_auto_heal_disabled_returns_none ... ok
+test healing::tests::test_healing_action_display ... ok
+test healing::tests::test_auto_heal_from_anomaly_applies_action ... ok
+test healing::tests::test_full_anomaly_detect_and_heal_pipeline ... ok
+test healing::tests::test_apply_healing_action_succeeds ... ok
+test healing::tests::test_heal_count_accumulates ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_store-fdcaeb82fb46ad8a.exe)
+
+running 9 tests
+test crdt::tests::test_lww_integer_values ... ok
+test crdt::tests::test_lww_same_writer_same_time_no_update ... ok
+test crdt::tests::test_lww_tie_break_by_writer_id ... ok
+test crdt::tests::test_lww_new_creates_correctly ... ok
+test crdt::tests::test_lww_newer_wins ... ok
+test crdt::tests::test_lww_older_does_not_overwrite ... ok
+test crdt::tests::test_lww_json_serialization ... ok
+test store::tests::test_store_agent_memory ... ok
+test store::tests::test_store_save_and_list_nodes ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_tui-822bae8d659ee32c.exe)
+
+running 11 tests
+test app::tests::test_tab_all_has_five_elements ... ok
+test app::tests::test_tab_titles ... ok
+test app::tests::test_tab_navigation_next ... ok
+test app::tests::test_tab_navigation_prev_wraps ... ok
+test app::tests::test_app_initializes_with_nodes ... ok
+test app::tests::test_scroll_down_and_up ... ok
+test app::tests::test_tick_increments_count ... ok
+test app::tests::test_log_appends_messages ... ok
+test app::tests::test_log_limits_to_200 ... ok
+test app::tests::test_uptime_format ... ok
+test app::tests::test_refresh_updates_timestamp ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src\lib.rs (target\debug\deps\netgene_wasm-9e2ec47ec373b5c9.exe)
+
+running 2 tests
+test sandbox::tests::test_wasm_unsigned_rejection ... ok
+test sandbox::tests::test_wasm_execution_valid ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_builder
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_dao
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_ebpf
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_gene
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_k8s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_kernel
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_llm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_mobile
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_neural
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_p2p
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_qpu
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_quantum
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_safeguard
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_store
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_tui
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests netgene_wasm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

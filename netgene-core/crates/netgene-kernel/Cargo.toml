@@ -1,0 +1,24 @@
+[package]
+name = "netgene-kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene Netsphere Kernel — Multi-agent collective intelligence"
+
+[dependencies]
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+netgene-gene = { workspace = true }
+netgene-store = { workspace = true }
+netgene-llm = { workspace = true }
+num-bigint = { version = "0.4", features = ["rand", "serde"] }
+num-traits = "0.2"
+rand = "0.8"

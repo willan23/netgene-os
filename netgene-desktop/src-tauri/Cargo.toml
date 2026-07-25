@@ -1,0 +1,43 @@
+[package]
+name = "netgene-desktop"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "netgene_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.36", features = ["full"] }
+rand = "0.8"
+uuid = { version = "1.7", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+
+# NetGene Core Crates
+nalgebra = "0.33"
+num-bigint = { version = "0.4", features = ["serde"] }
+netgene-kernel = { path = "../../netgene-core/crates/netgene-kernel" }
+netgene-cloud = { path = "../../netgene-core/crates/netgene-cloud" }
+netgene-quantum = { path = "../../netgene-core/crates/netgene-quantum" }
+netgene-store = { path = "../../netgene-core/crates/netgene-store" }
+netgene-dao = { path = "../../netgene-core/crates/netgene-dao" }
+netgene-qpu = { path = "../../netgene-core/crates/netgene-qpu" }
+netgene-neural = { path = "../../netgene-core/crates/netgene-neural" }
+netgene-vault = { path = "../../netgene-core/crates/netgene-vault" }
+netgene-llm = { path = "../../netgene-core/crates/netgene-llm" }
+netgene-wasm = { path = "../../netgene-core/crates/netgene-wasm" }

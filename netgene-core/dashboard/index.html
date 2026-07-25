@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetGene OS — Command Center</title>
+<meta name="description" content="NetGene OS — Living, Self-Evolving, Quantum-Enhanced Distributed Network Operating System">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <!-- Animated background particles -->
+  <canvas id="bg-canvas"></canvas>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="logo">
+        <span class="logo-icon">🧬</span>
+        <div>
+          <div class="logo-title">NetGene OS</div>
+          <div class="logo-sub">v0.3 Megastructure</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a class="nav-item active" data-tab="dashboard" href="#">
+          <span class="nav-icon">⬡</span> Dashboard
+        </a>
+        <a class="nav-item" data-tab="gene" href="#">
+          <span class="nav-icon">🔑</span> Gene Layer
+        </a>
+        <a class="nav-item" data-tab="agents" href="#">
+          <span class="nav-icon">🤖</span> Agents
+        </a>
+        <a class="nav-item" data-tab="network" href="#">
+          <span class="nav-icon">🌐</span> Network
+        </a>
+        <a class="nav-item" data-tab="quantum" href="#">
+          <span class="nav-icon">⚛️</span> Quantum
+        </a>
+        <a class="nav-item" data-tab="neural" href="#">
+          <span class="nav-icon">🧠</span> Neural BCI
+        </a>
+        <a class="nav-item" data-tab="safeguard" href="#">
+          <span class="nav-icon">🛡️</span> Safeguard
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-dot active"></div>
+        <span>All Systems Online</span>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-left">
+          <h1 id="page-title">Dashboard</h1>
+          <span class="breadcrumb">NetGene OS / Dashboard</span>
+        </div>
+        <div class="header-right">
+          <div class="pill pulse-green">● LIVE</div>
+          <div class="header-stat">
+            <span class="stat-label">Gene FP</span>
+            <span class="stat-value mono" id="gene-fp">...</span>
+          </div>
+          <div class="header-stat">
+            <span class="stat-label">Uptime</span>
+            <span class="stat-value mono" id="uptime">00:00:00</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Tab: Dashboard -->
+      <div class="tab-content active" id="tab-dashboard">
+        <!-- KPI row -->
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color:var(--cyan)">🌐</div>
+            <div>
+              <div class="kpi-value" id="kpi-health">96.2%</div>
+              <div class="kpi-label">Network Health</div>
+            </div>
+            <div class="kpi-trend up">↑ 0.3%</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color:var(--purple)">🤖</div>
+            <div>
+              <div class="kpi-value">3</div>
+              <div class="kpi-label">Active Agents</div>
+            </div>
+            <div class="kpi-trend up">● All Online</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color:var(--orange)">⚛️</div>
+            <div>
+              <div class="kpi-value" id="kpi-quantum">+18.4%</div>
+              <div class="kpi-label">Quantum Gain</div>
+            </div>
+            <div class="kpi-trend up">↑ QAOA-sim</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon" style="color:var(--green)">🛡️</div>
+            <div>
+              <div class="kpi-value" id="kpi-heals">0</div>
+              <div class="kpi-label">Self-Heals</div>
+            </div>
+            <div class="kpi-trend">● Safeguard OK</div>
+          </div>
+        </div>
+
+        <!-- Main panels -->
+        <div class="panel-grid">
+          <!-- Network 3D viz -->
+          <div class="panel span-2">
+            <div class="panel-header">
+              <span class="panel-title">🌐 Network Topology (3D)</span>
+              <span class="panel-badge">LIVE</span>
+            </div>
+            <canvas id="network-canvas" width="800" height="320"></canvas>
+          </div>
+
+          <!-- Gene Layer card -->
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">🔑 Gene Layer</span>
+            </div>
+            <div class="info-list">
+              <div class="info-row">
+                <span class="info-key">Role</span>
+                <span class="info-val cyan bold">MASTER</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">Status</span>
+                <span class="info-val green bold">ACTIVE ●</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">Crypto</span>
+                <span class="info-val">Ed25519 + PQC ready</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">FP</span>
+                <span class="info-val mono orange" id="gene-fp-panel">—</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">Caps</span>
+                <span class="info-val small">gene.* node.* quantum.*</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Agents mini -->
+          <div class="panel span-2">
+            <div class="panel-header">
+              <span class="panel-title">🤖 Netsphere Agents</span>
+            </div>
+            <div class="agent-list">
+              <div class="agent-row">
+                <div class="agent-dot green"></div>
+                <div class="agent-name">BuilderAgent</div>
+                <div class="agent-type">builder</div>
+                <div class="agent-status">IDLE</div>
+                <div class="agent-desc">Organic node provisioning</div>
+              </div>
+              <div class="agent-row">
+                <div class="agent-dot cyan pulse"></div>
+                <div class="agent-name">MonitorAgent</div>
+                <div class="agent-type">monitor</div>
+                <div class="agent-status cyan">MONITORING</div>
+                <div class="agent-desc">Anomaly detection · Z-score</div>
+              </div>
+              <div class="agent-row">
+                <div class="agent-dot purple pulse"></div>
+                <div class="agent-name">OptimizerAgent</div>
+                <div class="agent-type">optimizer</div>
+                <div class="agent-status purple">QUANTUM</div>
+                <div class="agent-desc">QAOA routing optimization</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quantum panel -->
+          <div class="panel">
+            <div class="panel-header">
+              <span class="panel-title">⚛️ Quantum Enhancement</span>
+            </div>
+            <div class="info-list">
+              <div class="info-row">
+                <span class="info-key">Algorithm</span>
+                <span class="info-val purple bold">QAOA-sim (p=3)</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">Annealing</span>
+                <span class="info-val purple">SQA (500 steps)</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">Routing Δ</span>
+                <span class="info-val green bold" id="q-delta">+18.4%</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">PQC</span>
+                <span class="info-val">ML-KEM ready</span>
+              </div>
+              <div class="info-row">
+                <span class="info-key">Hardware</span>
+                <span class="info-val small">Classical → Quantum Phase 2</span>
+              </div>
+            </div>
+            <div class="q-progress-wrap">
+              <div class="q-progress-label">Optimization Gain</div>
+              <div class="q-progress-bar">
+                <div class="q-progress-fill" id="q-bar" style="width:55%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Gene -->
+      <div class="tab-content" id="tab-gene">
+        <div class="panel" style="max-width:600px">
+          <div class="panel-header"><span class="panel-title">🔑 Gene Layer — Identity</span></div>
+          <div class="info-list">
+            <div class="info-row"><span class="info-key">Gene ID</span><span class="info-val mono small" id="g-id">—</span></div>
+            <div class="info-row"><span class="info-key">Name</span><span class="info-val" id="g-name">NetGene Master</span></div>
+            <div class="info-row"><span class="info-key">Role</span><span class="info-val cyan bold">MASTER</span></div>
+            <div class="info-row"><span class="info-key">Status</span><span class="info-val green bold">ACTIVE ●</span></div>
+            <div class="info-row"><span class="info-key">Algorithm</span><span class="info-val">Ed25519 (Post-Quantum upgrade → ML-KEM/Dilithium)</span></div>
+            <div class="info-row"><span class="info-key">Fingerprint</span><span class="info-val mono orange" id="g-fp">—</span></div>
+            <div class="info-row"><span class="info-key">Created</span><span class="info-val mono small" id="g-created">—</span></div>
+          </div>
+          <div class="caps-grid" id="caps-grid"></div>
+          <div class="cmd-box">
+            <span class="cmd-prompt">$</span> netgene gene init --name "My Node"
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Agents -->
+      <div class="tab-content" id="tab-agents">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">🤖 Netsphere Kernel — Agents</span></div>
+          <table class="data-table">
+            <thead>
+              <tr><th>Name</th><th>Type</th><th>Status</th><th>BDI Model</th><th>Capability</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="cyan bold">BuilderAgent</td>
+                <td class="mono">builder</td>
+                <td><span class="badge green">IDLE</span></td>
+                <td>Intent → Provision</td>
+                <td>Organic node spawning, digital twins</td>
+              </tr>
+              <tr>
+                <td class="cyan bold">MonitorAgent</td>
+                <td class="mono">monitor</td>
+                <td><span class="badge cyan">MONITORING</span></td>
+                <td>Observe → Alert</td>
+                <td>Z-score anomaly, eBPF hooks (Phase 2)</td>
+              </tr>
+              <tr>
+                <td class="cyan bold">OptimizerAgent</td>
+                <td class="mono">optimizer</td>
+                <td><span class="badge purple">QUANTUM</span></td>
+                <td>Analyze → Optimize</td>
+                <td>QAOA routing, resource scheduling</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="cmd-box">
+            <span class="cmd-prompt">$</span> netgene agent dispatch "spawn 3 nodes"
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Network -->
+      <div class="tab-content" id="tab-network">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">🌐 Network Topology</span></div>
+          <canvas id="network-canvas-2" width="800" height="350"></canvas>
+          <table class="data-table" style="margin-top:1rem">
+            <thead><tr><th>Node</th><th>Status</th><th>Load</th><th>Latency</th><th>Connections</th></tr></thead>
+            <tbody id="nodes-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab: Quantum -->
+      <div class="tab-content" id="tab-quantum">
+        <div class="panel-grid">
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">⚛️ QAOA Optimizer</span></div>
+            <div class="info-list">
+              <div class="info-row"><span class="info-key">Algorithm</span><span class="info-val purple bold">QAOA (p=3, 100 iters)</span></div>
+              <div class="info-row"><span class="info-key">Problem</span><span class="info-val">QUBO — Quadratic Binary Optimization</span></div>
+              <div class="info-row"><span class="info-key">Use case</span><span class="info-val">Route selection, resource allocation</span></div>
+              <div class="info-row"><span class="info-key">Advantage</span><span class="info-val green">Exponential at scale >100 nodes</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">🌡️ Simulated Quantum Annealing</span></div>
+            <div class="info-list">
+              <div class="info-row"><span class="info-key">Steps</span><span class="info-val">500</span></div>
+              <div class="info-row"><span class="info-key">Temp range</span><span class="info-val">10 → 0.001</span></div>
+              <div class="info-row"><span class="info-key">Tunneling</span><span class="info-val purple">Transverse field Γ → 0</span></div>
+              <div class="info-row"><span class="info-key">Routing gain</span><span class="info-val green bold" id="q-gain2">+18.4%</span></div>
+            </div>
+          </div>
+          <div class="panel span-2">
+            <div class="panel-header"><span class="panel-title">⚛️ Phase 2 Roadmap</span></div>
+            <div class="roadmap-list">
+              <div class="roadmap-item">
+                <div class="roadmap-dot done"></div>
+                <div><b>Phase 1:</b> Quantum-inspired classical simulation (QAOA-sim + SQA)</div>
+              </div>
+              <div class="roadmap-item">
+                <div class="roadmap-dot next"></div>
+                <div><b>Phase 2:</b> AWS Braket / IBM Q hybrid via REST API</div>
+              </div>
+              <div class="roadmap-item">
+                <div class="roadmap-dot future"></div>
+                <div><b>Phase 3:</b> Real-time quantum hardware for routing (dedicated QPU)</div>
+              </div>
+              <div class="roadmap-item">
+                <div class="roadmap-dot future"></div>
+                <div><b>Phase 4:</b> Post-Quantum Crypto upgrade (ML-KEM / Dilithium keys)</div>
+              </div>
+            </div>
+          </div>
+      </div>
+
+      <!-- Tab: Neural BCI -->
+      <div class="tab-content" id="tab-neural">
+        <div class="panel-grid">
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">🧠 BCI Signal Telemetry</span></div>
+            <div class="info-list">
+              <div class="info-row"><span class="info-key">Signal Quality</span><span class="info-val green bold">98.4% (Optimal)</span></div>
+              <div class="info-row"><span class="info-key">Alpha Band (8-12 Hz)</span><span class="info-val cyan mono">0.82 uV</span></div>
+              <div class="info-row"><span class="info-key">Beta Band (12-30 Hz)</span><span class="info-val purple mono">0.65 uV</span></div>
+              <div class="info-row"><span class="info-key">Gamma Band (30-100 Hz)</span><span class="info-val orange mono">0.44 uV</span></div>
+              <div class="info-row"><span class="info-key">Cognitive Load</span><span class="info-val green bold" id="neural-load">0.58</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">⚡ Thought-to-Action Stream</span></div>
+            <div class="info-list">
+              <div class="info-row"><span class="info-key">Active Focus</span><span class="info-val cyan bold" id="neural-focus">NODE_TOPOLOGY_OPTIMIZE</span></div>
+              <div class="info-row"><span class="info-key">Converted Intent</span><span class="info-val purple mono" id="neural-action">OPTIMIZE_ROUTE_NODE_01</span></div>
+              <div class="info-row"><span class="info-key">Latency</span><span class="info-val green">1.2ms (Direct Pipeline)</span></div>
+            </div>
+          </div>
+          <div class="panel span-2">
+            <div class="panel-header"><span class="panel-title">🧠 Neural Command Console</span></div>
+            <div class="cmd-box" style="margin-top:0">
+              <span class="cmd-prompt">thought@netgene~$</span> <span id="neural-stream-text">Focusing on node-01 -> high cognitive load -> triggering quantum route optimization...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Safeguard -->
+      <div class="tab-content" id="tab-safeguard">
+        <div class="panel-grid">
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">🛡️ Safeguard Status</span></div>
+            <div class="info-list">
+              <div class="info-row"><span class="info-key">Mode</span><span class="info-val green bold">ACTIVE — Auto-heal ON</span></div>
+              <div class="info-row"><span class="info-key">Detection</span><span class="info-val">Z-score anomaly (window=50, σ=2.5)</span></div>
+              <div class="info-row"><span class="info-key">Zero-trust</span><span class="info-val green">mTLS everywhere</span></div>
+              <div class="info-row"><span class="info-key">Threat level</span><span class="info-val green bold">LOW</span></div>
+              <div class="info-row"><span class="info-key">Anomalies</span><span class="info-val red" id="sg-anomalies">0</span></div>
+              <div class="info-row"><span class="info-key">Heals applied</span><span class="info-val green" id="sg-heals">0</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><span class="panel-title">⚡ Self-Healing Actions</span></div>
+            <div class="info-list">
+              <div class="info-row"><span class="info-key">Critical</span><span class="info-val red">Isolate node</span></div>
+              <div class="info-row"><span class="info-key">High</span><span class="info-val orange">Reroute traffic</span></div>
+              <div class="info-row"><span class="info-key">Medium</span><span class="info-val yellow">Scale up resources</span></div>
+              <div class="info-row"><span class="info-key">Low</span><span class="info-val">Alert operator</span></div>
+            </div>
+          </div>
+          <div class="panel span-2">
+            <div class="panel-header"><span class="panel-title">📋 Event Log</span></div>
+            <div id="event-log" class="event-log"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

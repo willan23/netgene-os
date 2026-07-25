@@ -1,0 +1,15 @@
+[package]
+name = "netgene-qpu"
+version = "0.6.0"
+edition = "2021"
+description = "Real Hardware QPU REST Connector & OpenQASM 3.0 Transpiler for NetGene OS"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }

@@ -1,0 +1,11 @@
+{
+  "id": "sentinel-guard-v2",
+  "name": "Sentinel Guard",
+  "version": "2.1.0",
+  "description": "Zero-Trust network observer. Detects anomalies using Z-Score algorithms and heals routes.",
+  "author": "CyberSec Org",
+  "capabilities": [
+    "anomaly-detection",
+    "self-healing"
+  ]
+}

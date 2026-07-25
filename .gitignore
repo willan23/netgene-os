@@ -1,0 +1,39 @@
+# Rust build output
+/target
+/**/target
+**/*.rs.bk
+*.pdb
+
+# Node & Frontend build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.tauri/
+**/src-tauri/target/
+
+# Sensitive & Secret Files (Security & Privacy Protection)
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.keystore
+*.jks
+*.p12
+*.pfx
+*serviceAccount*.json
+*firebase*.json
+secrets/
+private/
+
+# IDE & OS Metadata
+.vscode/
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+*.log

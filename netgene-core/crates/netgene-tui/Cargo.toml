@@ -1,0 +1,21 @@
+[package]
+name = "netgene-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene Terminal UI — Interactive ratatui dashboard"
+
+[dependencies]
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+netgene-gene = { workspace = true }
+netgene-kernel = { workspace = true }
+netgene-quantum = { workspace = true }
+netgene-safeguard = { workspace = true }
+netgene-builder = { workspace = true }

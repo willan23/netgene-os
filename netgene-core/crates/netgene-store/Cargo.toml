@@ -1,0 +1,20 @@
+[package]
+name = "netgene-store"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene Store — Sled-based persistence layer with CRDT state synchronization"
+
+[dependencies]
+sled = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+netgene-gene = { workspace = true }

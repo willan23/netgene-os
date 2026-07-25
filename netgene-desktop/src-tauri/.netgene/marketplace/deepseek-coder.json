@@ -1,0 +1,11 @@
+{
+  "id": "deepseek-coder-bdi",
+  "name": "DeepSeek Coder Agent",
+  "version": "1.0.0",
+  "description": "Autonomous coding agent powered by DeepSeek. Generates and reviews code dynamically.",
+  "author": "NetGene Community",
+  "capabilities": [
+    "code-gen",
+    "review"
+  ]
+}

@@ -1,0 +1,42 @@
+# Plano de Execução: Fase 2.0 (FHE & Criptografia Avançada)
+
+Com a Fase 1.5 concluída (considerando o eBPF isolado para ambientes Linux num futuro deployment), avançamos oficialmente para a **Fase 2.0 (2027)**. O primeiro objetivo é um dos mais complexos e revolucionários do mundo digital: **Fully Homomorphic Encryption (FHE) em rotas selecionadas**.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Problema com o eBPF no Windows:** Desenvolver eBPF real no Windows exige o Windows Driver Kit (WDK), compilação em C, e assinatura de drivers ao nível do SO, algo que a nossa sandbox atual não permite executar de forma imediata e "sem mocks".
+>
+> **A Solução FHE (Fase 2.0):** Para mantermos a promessa de não usar "mocks" e avançar para tecnologia real, proponho implementarmos um motor de **Criptografia Parcialmente Homomórfica (PHE - Algoritmo Paillier)** nativo em Rust. Isto vai permitir que o NetSphere calcule o peso (latência) de uma rota *mesmo estando encriptada*. O nó A cifra a latência, o nó B soma a sua latência cifrada, e o Kernel otimiza a rede sem nunca conseguir ler o valor real em plain-text. Isto garante privacidade matemática absoluta. Concorda com este salto para o FHE/PHE em Rust?
+
+## Proposed Changes
+
+### 1. Novo Motor Criptográfico: `netgene-crypto`
+Em vez de depender de bibliotecas FHE externas gigantescas (como `tfhe-rs` que podem demorar horas a compilar), vamos construir a nossa própria matemática sobre BigInt para a **Criptografia de Paillier** no core do NetGene.
+- **O que faz:** Permite operações algébricas (neste caso, a soma e multiplicação por escalar) sobre dados cifrados.
+
+### 2. Integração no `NetSphereKernel`
+- Os nós armazenados no `NetGeneStore` passarão a poder ter um campo `encrypted_load`.
+- Quando o `OptimizerAgent` for chamado, ele otimizará as rotas fazendo cálculos sobre os pacotes cifrados homomorficamente.
+- Serão criados comandos Tauri (`generate_fhe_keys`, `homomorphic_compute_route`) para que a UI desktop possa provar matematicamente este conceito na nova aba "Gene Layer".
+
+---
+
+### [Componentes Afetados]
+
+#### [NEW] `netgene-core/crates/netgene-kernel/src/crypto.rs`
+- Implementação de raíz do criptossistema homomórfico (Paillier), geração de chaves públicas/privadas, funções `encrypt`, `decrypt` e `homomorphic_add`.
+
+#### [MODIFY] `netgene-core/crates/netgene-kernel/Cargo.toml`
+- Adição da dependência `num-bigint` (essencial para matemática criptográfica) e `num-traits`.
+
+#### [MODIFY] `netgene-desktop/src-tauri/src/lib.rs`
+- Novos comandos Tauri que expõem o gerador de chaves FHE/PHE e a prova de soma homomórfica, para demonstrar ao mundo que o NetGene consegue rotear pacotes "às cegas".
+
+#### [MODIFY] `netgene-desktop/src/components/views/GeneLayer.tsx`
+- Interface visual interativa para demonstrar a Criptografia Homomórfica. O utilizador poderá colocar dois valores de latência, cifrá-los, pedir ao Kernel para somar os *ciphers* (textos cifrados), e o frontend decifrará para provar que a soma bate certo sem o Kernel ter lido nada!
+
+## Verification Plan
+1. **Compilação**: Validar que o módulo `crypto.rs` compila com `num-bigint`.
+2. **Prova Matemática**: Adicionarei testes unitários `#[test]` em Rust que provam que `Decrypt( Encrypt(A) ⊕ Encrypt(B) ) == A + B`.
+3. **UI Demonstration**: Usar a UI da *Gene Layer* para introduzir valores e ver o *Ciphertext* ilegível a ser processado matematicamente com sucesso.

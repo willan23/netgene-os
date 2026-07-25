@@ -1,0 +1,10 @@
+[package]
+name = "netgene-tpm"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
