@@ -1,11 +1,26 @@
 # NetGene OS 🧬
 ### *Living · Self-Evolving · Quantum-Enhanced Distributed Operating System*
 
+[![Website](https://img.shields.io/badge/Website-mnemosyne--one.com-cyan.svg?style=for-the-badge&logo=globe)](https://mnemosyne-one.com)
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue.svg?style=for-the-badge&logo=tauri)](https://tauri.app/)
 [![eBPF](https://img.shields.io/badge/Linux-eBPF_Zero_Copy-red.svg?style=for-the-badge&logo=linux)](https://ebpf.io/)
 [![Quantum](https://img.shields.io/badge/Quantum-QAOA%2FSQA-purple.svg?style=for-the-badge)](https://qiskit.org/)
 [![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-green.svg?style=for-the-badge)](LICENSE)
+
+---
+
+## 🌐 Official Web Portal & Domain
+
+- **Official Web Portal**: [https://mnemosyne-one.com](https://mnemosyne-one.com)
+- **Live Platform**: [https://mnemosyne-one.web.app](https://mnemosyne-one.web.app)
+
+---
+
+## 💳 Sistema de Pagamento / Billing System Note
+
+> [!NOTE]
+> **Arquitetura de Pagamentos**: O sistema possui suporte integrado para gestão de subscrições e pagamentos (Stripe Billing Integration), mas **encontra-se atualmente em modo de demonstração / inativo** para acesso livre durante a fase de lançamento.
 
 ---
 
