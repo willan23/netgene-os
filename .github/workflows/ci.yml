@@ -27,11 +27,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: netgene-core
-      - name: eBPF toolchain (clang + libbpf headers)
+      - name: Linux toolchain (eBPF: clang + libbpf; SAML: libxml2 + xmlsec1)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang libbpf-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang libbpf-dev libxml2-dev libxmlsec1-dev libxmlsec1-openssl libssl-dev
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - name: SAML (optional feature, needs xmlsec)
+        if: runner.os == 'Linux'
+        run: cargo test -p netgene-enterprise --features saml
 
   audit:
     name: Security audit

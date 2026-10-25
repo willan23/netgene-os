@@ -7,6 +7,10 @@ license.workspace = true
 publish.workspace = true
 description = "NetGene Enterprise — OIDC identity binding: corporate ID tokens mapped to Gene capabilities"
 
+[features]
+# SAML 2.0 responses (samael + xmlsec: needs libxml2, xmlsec1 and OpenSSL).
+saml = ["dep:samael"]
+
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
@@ -16,7 +20,10 @@ base64 = { workspace = true }
 ring = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
+samael = { version = "0.0.22", optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
 tempfile = "3"
+uuid = { workspace = true }
+rcgen = "0.14"

@@ -11,6 +11,10 @@ description = "NetGene CLI — Main entry point and command interface"
 name = "netgene"
 path = "src/main.rs"
 
+[features]
+# SAML 2.0 grants (`gene grant-saml`); needs libxml2, xmlsec1 and OpenSSL.
+saml = ["netgene-enterprise/saml"]
+
 [dependencies]
 tokio = { workspace = true }
 clap = { workspace = true }

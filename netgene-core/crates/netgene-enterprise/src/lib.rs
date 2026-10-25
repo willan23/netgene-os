@@ -1,7 +1,8 @@
 //! # NetGene Enterprise
 //!
 //! Binds a corporate identity (an OpenID Connect ID token from Okta, Entra ID,
-//! Keycloak, Google Workspace…) to NetGene capabilities. The token is
+//! Keycloak, Google Workspace…, or a SAML 2.0 response with the `saml`
+//! feature) to NetGene capabilities. The token is
 //! verified against the IdP's JWKS; its group/role claim is mapped to
 //! capabilities through `~/.netgene/enterprise.json`; the caller then issues
 //! a time-limited [capability token](netgene_gene::CapabilityToken).
@@ -11,6 +12,9 @@
 //! - the key is selected by `kid` from the configured JWKS;
 //! - `iss` must match exactly, `aud` must contain the configured client id,
 //!   `exp`/`nbf` are checked with 60 s of clock leeway.
+
+#[cfg(feature = "saml")]
+pub mod saml;
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -316,13 +320,12 @@ pub fn verify_id_token(config: &OidcConfig, jwks: &JwkSet, token: &str, now: Dat
 
 /// Capabilities granted by the identity's roles (deduplicated, sorted).
 pub fn capabilities_for(config: &OidcConfig, identity: &VerifiedIdentity) -> Vec<String> {
-    let mut caps: Vec<String> = identity
-        .roles
-        .iter()
-        .filter_map(|r| config.role_capabilities.get(r))
-        .flatten()
-        .cloned()
-        .collect();
+    map_roles(&config.role_capabilities, &identity.roles)
+}
+
+/// Union of the capabilities mapped to `roles`, sorted.
+pub fn map_roles(role_capabilities: &BTreeMap<String, Vec<String>>, roles: &[String]) -> Vec<String> {
+    let mut caps: Vec<String> = roles.iter().filter_map(|r| role_capabilities.get(r)).flatten().cloned().collect();
     caps.sort();
     caps.dedup();
     caps
