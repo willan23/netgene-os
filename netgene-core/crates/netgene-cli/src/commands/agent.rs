@@ -34,21 +34,44 @@ async fn boot_as(gene: &str) -> Result<(NetSphereKernel, Option<PresenceEnrollme
     }
     let enrollment = PresenceEnrollment::load(&presence_dir(), operator.id)?;
     let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
+    let passkeys = netgene_presence::webauthn::load_passkeys(&presence_dir(), operator.id)?;
     let config = KernelConfig {
-        operator, operator_kp, policy: load_policy()?, audit_path: Some(audit_path()), grants, presence_key, workspace: workspace()?,
+        operator, operator_kp, policy: load_policy()?, audit_path: Some(audit_path()), grants, presence_key, passkeys, workspace: workspace()?,
     };
     Ok((NetSphereKernel::boot_with(config).await?, enrollment))
 }
 
-/// Approve a pending proposal when `confirm` is set (with Windows Hello if the policy says so).
-async fn resolve(kernel: &NetSphereKernel, outcome: DispatchOutcome, confirm: bool, enrollment: Option<&PresenceEnrollment>, gene: &str) -> Result<()> {
+/// How a pending proposal is approved.
+#[derive(Clone, Copy)]
+struct Approval {
+    confirm: bool,
+    passkey: bool,
+}
+
+/// Approve a pending proposal when asked (with a passkey, or Windows Hello if the policy requires presence).
+async fn resolve(kernel: &NetSphereKernel, outcome: DispatchOutcome, approval: Approval, enrollment: Option<&PresenceEnrollment>, gene: &str) -> Result<()> {
     println!("{}", outcome.summary());
     let DispatchOutcome::PendingConfirmation { proposal_id, .. } = outcome else { return Ok(()) };
-    if !confirm {
+    if !approval.confirm {
         println!("   Re-run with --confirm to approve. Nothing was executed.");
         return Ok(());
     }
-    let outcome = if kernel.requires_user_presence() {
+    let outcome = if approval.passkey {
+        let ceremony = super::passkey::Ceremony::bind().await?;
+        let origin = ceremony.origin();
+        let options = kernel.passkey_request(proposal_id, netgene_presence::webauthn::LOCAL_RP_ID).await?;
+        let answer = match ceremony.run(super::passkey::Mode::Get, options, &format!("Approve proposal {}", proposal_id)).await {
+            Ok(answer) => answer,
+            Err(e) => {
+                kernel.reject(proposal_id).await?;
+                return Err(e);
+            }
+        };
+        let assertion: netgene_presence::webauthn::AssertionResponse = serde_json::from_value(answer)?;
+        let (outcome, passkeys) = kernel.confirm_with_passkey(proposal_id, &assertion, &origin).await?;
+        netgene_presence::webauthn::save_passkeys(&presence_dir(), kernel.operator().id, &passkeys)?;
+        outcome
+    } else if kernel.requires_user_presence() {
         let enrollment = enrollment.ok_or_else(|| {
             anyhow::anyhow!("Policy requires user presence: run `netgene gene enroll-presence --gene {}` first", gene)
         })?;
@@ -102,6 +125,9 @@ pub enum AgentCommand {
         /// Approve the run if the policy holds it for confirmation
         #[arg(long)]
         confirm: bool,
+        /// Approve with an enrolled passkey (this device or a phone)
+        #[arg(long, requires = "confirm")]
+        passkey: bool,
     },
     /// Propose a natural-language intent; the policy decides whether it runs
     Dispatch {
@@ -113,6 +139,9 @@ pub enum AgentCommand {
         /// Approve an action that the policy holds for confirmation
         #[arg(long)]
         confirm: bool,
+        /// Approve with an enrolled passkey (this device or a phone)
+        #[arg(long, requires = "confirm")]
+        passkey: bool,
     },
     /// Verify the audit log and show its latest entries (or export it for a SIEM)
     Audit {
@@ -191,18 +220,18 @@ pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
             println!("✅ Installed agent '{}' v{} [{}] at {}", module.name, module.version, module.permissions.join(", "), path.display());
         }
 
-        AgentCommand::Run { agent, input, gene, confirm } => {
+        AgentCommand::Run { agent, input, gene, confirm, passkey } => {
             let (kernel, enrollment) = boot_as(&gene).await?;
             let action = netgene_policy::Action::new("agent.run", serde_json::json!({ "agent": agent, "input": input }));
             let outcome = kernel.propose_action(&format!("agent run {}", agent), action, "requested from the CLI".into()).await?;
-            resolve(&kernel, outcome, confirm, enrollment.as_ref(), &gene).await?;
+            resolve(&kernel, outcome, Approval { confirm, passkey }, enrollment.as_ref(), &gene).await?;
         }
 
-        AgentCommand::Dispatch { intent, gene, confirm } => {
+        AgentCommand::Dispatch { intent, gene, confirm, passkey } => {
             let (kernel, enrollment) = boot_as(&gene).await?;
             println!("📡 Proposing intent: \"{}\"", intent);
             let outcome = kernel.propose_intent(&intent).await?;
-            resolve(&kernel, outcome, confirm, enrollment.as_ref(), &gene).await?;
+            resolve(&kernel, outcome, Approval { confirm, passkey }, enrollment.as_ref(), &gene).await?;
         }
 
         AgentCommand::Audit { last, export, out } => {

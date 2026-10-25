@@ -108,7 +108,8 @@ fn kernel_config(netgene_dir: &std::path::Path, store: NetGeneStore) -> anyhow::
         Some((operator, operator_kp)) => {
             let enrollment = PresenceEnrollment::load(&netgene_dir.join("presence"), operator.id)?;
             let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
-            (KernelConfig { operator, operator_kp, policy, audit_path, grants: vec![], presence_key, workspace }, enrollment)
+            let passkeys = netgene_presence::webauthn::load_passkeys(&netgene_dir.join("presence"), operator.id)?;
+            (KernelConfig { operator, operator_kp, policy, audit_path, grants: vec![], presence_key, passkeys, workspace }, enrollment)
         }
         None => (KernelConfig { policy, audit_path, workspace, ..KernelConfig::ephemeral()? }, None),
     })

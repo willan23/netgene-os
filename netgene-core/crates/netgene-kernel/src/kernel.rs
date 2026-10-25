@@ -36,6 +36,8 @@ pub struct KernelConfig {
     pub grants: Vec<Grant>,
     /// Enrolled hardware user-presence key (PKCS#1 RSA public key), if any.
     pub presence_key: Option<Vec<u8>>,
+    /// Enrolled WebAuthn passkeys of the operator (another presence factor).
+    pub passkeys: Vec<netgene_presence::webauthn::PasskeyCredential>,
     /// Where actions persist what they create.
     pub workspace: Workspace,
 }
@@ -51,6 +53,7 @@ impl KernelConfig {
             audit_path: None,
             grants: vec![],
             presence_key: None,
+            passkeys: vec![],
             workspace: Workspace::ephemeral()?,
         })
     }
@@ -89,6 +92,7 @@ pub struct NetSphereKernel {
     pending: Mutex<HashMap<Uuid, (String, Action)>>,
     grants: Vec<Grant>,
     presence_key: Option<Vec<u8>>,
+    passkeys: Mutex<Vec<netgene_presence::webauthn::PasskeyCredential>>,
     executor: Mutex<Executor>,
     /// Marketplace manifests installed through [`Self::inject_marketplace_agent`].
     marketplace_agents: Mutex<Vec<AgentInfo>>,
@@ -118,6 +122,7 @@ impl NetSphereKernel {
             pending: Mutex::new(HashMap::new()),
             grants: config.grants,
             presence_key: config.presence_key,
+            passkeys: Mutex::new(config.passkeys),
             marketplace_agents: Mutex::new(vec![]),
             booted_at: chrono::Utc::now(),
         })
@@ -212,6 +217,49 @@ impl NetSphereKernel {
             anyhow::bail!("User-presence signature is invalid for proposal {}", proposal_id);
         }
         self.confirm_inner(proposal_id, format!("proposal {} (user presence verified)", proposal_id)).await
+    }
+
+    /// `navigator.credentials.get` options whose challenge binds `proposal_id`.
+    pub async fn passkey_request(&self, proposal_id: Uuid, rp_id: &str) -> Result<serde_json::Value> {
+        let passkeys = self.passkeys.lock().await;
+        if passkeys.is_empty() {
+            anyhow::bail!("No passkey enrolled for the operator");
+        }
+        let challenge = self.presence_challenge(proposal_id).await?;
+        Ok(netgene_presence::webauthn::request_options(&passkeys, &challenge, rp_id))
+    }
+
+    /// Human approval backed by a WebAuthn assertion over the proposal's
+    /// challenge, made on `origin`. Returns the outcome and the passkeys with
+    /// their updated signature counters (to persist).
+    pub async fn confirm_with_passkey(
+        &self,
+        proposal_id: Uuid,
+        assertion: &netgene_presence::webauthn::AssertionResponse,
+        origin: &str,
+    ) -> Result<(DispatchOutcome, Vec<netgene_presence::webauthn::PasskeyCredential>)> {
+        let challenge = self.presence_challenge(proposal_id).await?;
+        let verified = {
+            let passkeys = self.passkeys.lock().await;
+            netgene_presence::webauthn::verify_assertion(&passkeys, assertion, &challenge, origin)
+        };
+        let (index, count) = match verified {
+            Ok(v) => v,
+            Err(e) => {
+                let pending = self.pending.lock().await;
+                if let Some((input, action)) = pending.get(&proposal_id) {
+                    self.audit(input, Some(action), "presence_failed", &format!("proposal {} (passkey: {})", proposal_id, e)).await?;
+                }
+                return Err(e.context(format!("Passkey approval refused for proposal {}", proposal_id)));
+            }
+        };
+        let updated = {
+            let mut passkeys = self.passkeys.lock().await;
+            passkeys[index].sign_count = count;
+            passkeys.clone()
+        };
+        let outcome = self.confirm_inner(proposal_id, format!("proposal {} (passkey verified)", proposal_id)).await?;
+        Ok((outcome, updated))
     }
 
     async fn confirm_inner(&self, proposal_id: Uuid, detail: String) -> Result<DispatchOutcome> {

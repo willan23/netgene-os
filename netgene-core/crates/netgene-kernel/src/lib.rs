@@ -317,4 +317,59 @@ mod tests {
         assert!(format!("{err:#}").contains("kv"), "policy withholds kv: {err:#}");
         assert_eq!(kernel.audit_entries().await.unwrap().last().unwrap().record.decision, "failed");
     }
+
+    /// A passkey assertion over the proposal's challenge approves it once.
+    #[tokio::test]
+    async fn test_confirm_with_passkey() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine};
+        use netgene_presence::webauthn::{AssertionResponse, PasskeyCredential, LOCAL_RP_ID};
+        use ring::digest::{digest, SHA256};
+        use ring::rand::SystemRandom;
+        use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};
+
+        const ORIGIN: &str = "http://localhost:5555";
+        let rng = SystemRandom::new();
+        let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &rng).unwrap();
+        let key = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, pkcs8.as_ref(), &rng).unwrap();
+
+        let mut config = KernelConfig::ephemeral().unwrap();
+        config.passkeys = vec![PasskeyCredential {
+            gene_id: config.operator.id,
+            credential_id_b64: B64URL.encode([1u8; 16]),
+            alg: -7,
+            public_key_b64: B64URL.encode(key.public_key().as_ref()),
+            rsa_exponent_b64: None,
+            rp_id: LOCAL_RP_ID.into(),
+            sign_count: 0,
+            enrolled_at: chrono::Utc::now(),
+        }];
+        let kernel = NetSphereKernel::boot_with(config).await.unwrap();
+        let DispatchOutcome::PendingConfirmation { proposal_id, .. } = kernel.propose_intent("spawn 1 node").await.unwrap() else {
+            panic!("expected confirmation");
+        };
+
+        let assertion = |challenge: &[u8], counter: u32| {
+            let mut auth = digest(&SHA256, LOCAL_RP_ID.as_bytes()).as_ref().to_vec();
+            auth.push(0x05);
+            auth.extend_from_slice(&counter.to_be_bytes());
+            let client = serde_json::to_vec(&serde_json::json!({"type": "webauthn.get", "challenge": B64URL.encode(challenge), "origin": ORIGIN})).unwrap();
+            let mut signed = auth.clone();
+            signed.extend_from_slice(digest(&SHA256, &client).as_ref());
+            AssertionResponse {
+                credential_id: B64URL.encode([1u8; 16]),
+                client_data_json: B64URL.encode(client),
+                authenticator_data: B64URL.encode(auth),
+                signature: B64URL.encode(key.sign(&rng, &signed).unwrap().as_ref()),
+            }
+        };
+
+        assert!(kernel.confirm_with_passkey(proposal_id, &assertion(b"some other challenge", 1), ORIGIN).await.is_err());
+        let challenge = kernel.presence_challenge(proposal_id).await.unwrap();
+        let (outcome, updated) = kernel.confirm_with_passkey(proposal_id, &assertion(&challenge, 1), ORIGIN).await.unwrap();
+        assert!(matches!(outcome, DispatchOutcome::Executed { .. }));
+        assert_eq!(updated[0].sign_count, 1, "counter to persist");
+        let entries = kernel.audit_entries().await.unwrap();
+        assert!(entries.iter().any(|e| e.record.decision == "presence_failed"));
+        assert!(entries.iter().any(|e| e.record.detail.contains("passkey verified")));
+    }
 }

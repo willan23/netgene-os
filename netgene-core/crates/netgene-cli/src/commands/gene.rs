@@ -72,6 +72,11 @@ pub enum GeneCommand {
         #[arg(long)]
         gene: String,
     },
+    /// Enrol a WebAuthn passkey (this device or a phone) as a presence factor
+    EnrollPasskey {
+        #[arg(long)]
+        gene: String,
+    },
     /// Grant capabilities from a corporate OIDC ID token (mapping in ~/.netgene/enterprise.json)
     GrantOidc {
         /// Issuing gene (the subject's parent, normally the Master Gene)
@@ -272,6 +277,30 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
             enrollment.save(&grants::presence_dir())?;
             println!("✅ Presence key enrolled for {} ({})", gene.name, enrollment.method);
             println!("   Set \"require_user_presence\": true in ~/.netgene/policy.json to require it for confirmations.");
+        }
+
+        GeneCommand::EnrollPasskey { gene } => {
+            use netgene_presence::webauthn;
+            let gene = list_genes(&dir)?
+                .into_iter()
+                .find(|g| g.id.to_string() == gene)
+                .ok_or_else(|| anyhow::anyhow!("Gene {} not found", gene))?;
+            let mut challenge = [0u8; 32];
+            ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut challenge).map_err(|_| anyhow::anyhow!("RNG failure"))?;
+
+            let ceremony = super::passkey::Ceremony::bind().await?;
+            let origin = ceremony.origin();
+            let options = webauthn::creation_options(gene.id, &gene.name, &challenge, webauthn::LOCAL_RP_ID);
+            let answer = ceremony.run(super::passkey::Mode::Create, options, &format!("Create a passkey for gene {}", gene.name)).await?;
+            let response: webauthn::RegistrationResponse = serde_json::from_value(answer)?;
+            let credential = webauthn::verify_registration(gene.id, &response, &challenge, webauthn::LOCAL_RP_ID, &origin)?;
+
+            let mut passkeys = webauthn::load_passkeys(&grants::presence_dir(), gene.id)?;
+            passkeys.retain(|p| p.credential_id_b64 != credential.credential_id_b64);
+            passkeys.push(credential.clone());
+            webauthn::save_passkeys(&grants::presence_dir(), gene.id, &passkeys)?;
+            println!("✅ Passkey enrolled for {} (COSE alg {}, {} passkey(s) in total)", gene.name, credential.alg, passkeys.len());
+            println!("   Approve with `agent dispatch … --confirm --passkey`; set \"require_user_presence\": true to make it mandatory.");
         }
 
         GeneCommand::GrantOidc { issuer, subject, id_token } => {

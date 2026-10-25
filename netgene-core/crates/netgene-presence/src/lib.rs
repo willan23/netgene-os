@@ -6,6 +6,8 @@
 //! - **Windows:** Windows Hello `KeyCredentialManager` (RSA-2048 key in the
 //!   TPM / Windows Hello container, signs with RSASSA-PKCS1-v1.5 + SHA-256).
 //! - Other platforms: not yet implemented; [`is_available`] returns `false`.
+//! - **Any platform:** WebAuthn passkeys ([`webauthn`]), e.g. a phone used
+//!   through the browser's "use a phone" option.
 //!
 //! The challenge binds the proposal id and the exact action, so a proof for
 //! one action cannot be replayed for another.
@@ -18,6 +20,8 @@ use ring::signature::{UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
+
+pub mod webauthn;
 
 const CHALLENGE_DOMAIN: &[u8] = b"netgene-presence-challenge-v1\0";
 
