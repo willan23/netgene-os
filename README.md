@@ -4,9 +4,9 @@
 
 [![Website](https://img.shields.io/badge/Website-mnemosyne--one.com-cyan.svg)](https://mnemosyne-one.com)
 [![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-green.svg)](#licença)
-[![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#estado-real-de-cada-módulo)
+[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#estado-real-de-cada-módulo)
 
-> **Pre-alpha.** O NetGene OS ainda não está pronto para dados ou infraestrutura reais. A tabela [Estado real](#estado-real-de-cada-módulo) diz exatamente o que funciona e o que não funciona.
+> **Alpha.** As falhas críticas da auditoria foram fechadas na v0.4.0, mas o NetGene OS ainda não passou por auditoria externa. A tabela [Estado real](#estado-real-de-cada-módulo) diz exatamente o que funciona e quais limites continuam.
 
 ---
 
@@ -49,16 +49,16 @@ Mais detalhes em [netgene-core/docs/ARCHITECTURE.md](netgene-core/docs/ARCHITECT
 
 | Crate | Estado | O que faz de verdade | Limitação conhecida |
 |---|---|---|---|
-| `netgene-gene` | ✅ | Gera identidades Ed25519 (via `ring`), fingerprint SHA3-256, hierarquia Master → sub-genes, assinatura e verificação. | A chave privada é salva em base64 sem cifra. No Windows, sem permissões restritas. |
-| `netgene-p2p` | ✅ | Nó libp2p real: TCP + Noise + Yamux, Gossipsub assinado, mDNS, Kademlia, Identify. | Aceita qualquer peer da rede local. Ainda não liga o PeerId à identidade Gene. |
+| `netgene-gene` | ✅ | Identidades Ed25519 (via `ring`), fingerprint SHA3-256 e hierarquia Master → sub-genes com **linhagem assinada e verificável**. A chave privada fica no **cofre do sistema** (Windows Credential Manager, macOS Keychain, Linux Secret Service), nunca em disco. | Ainda não há assinatura pós-quântica (prevista para a Fase 2). |
+| `netgene-p2p` | ✅ | Nó libp2p: TCP + Noise + Yamux, Gossipsub assinado com validação estrita, mDNS e Kademlia. O **PeerId é derivado da Gene**, e só entram nós da mesma linhagem (allowlist). | libp2p 0.54 traz avisos de segurança em dependências transitivas (atualização prevista). Não há NAT traversal. |
 | `netgene-store` | ✅ | Banco local (sled) para nós, eventos e memória de agentes, com registrador CRDT LWW. | `sled` está sem manutenção ativa. Migração prevista para `redb`. |
 | `netgene-llm` | ✅ | Cliente Ollama (chat/generate) e parser de intenções com fallback por regras. | Modelo e URL fixos (`llama3`, `localhost:11434`). |
-| `netgene-kernel` | 🧪 | 5 agentes em tasks Tokio, barramento de mensagens, memória e registro local de agentes. | A saída do LLM vira ação sem motor de políticas. O marketplace não verifica assinatura. |
+| `netgene-kernel` | 🧪 | 5 agentes em tasks Tokio, barramento de mensagens, memória e marketplace local com **manifestos assinados** (verificados ao publicar, listar e instalar) e ids validados. | A saída do LLM vira ação sem motor de políticas (Fase 2). |
 | `netgene-safeguard` | 🧪 | Detecção de anomalias por z-score em janela deslizante. | As ações de "self-healing" são apenas registradas, não executadas. |
-| `netgene-wasm` | ⛔ | Valida o tamanho e o cabeçalho e compila o módulo com `wasmtime`. | Não executa o módulo. A assinatura não é verificada. |
-| `netgene-vault` | ⛔ | Fragmenta arquivos e cifra cada pedaço com AES-256-GCM. | A chave é gerada a cada execução e não é salva, então os arquivos ficam irrecuperáveis depois de reiniciar. |
-| `netgene-desktop` | 🧪 | Painel de nós, eventos, agentes, marketplace, vault e terminal de intenções. | Sem autenticação local. Depende dos limites acima. |
-| `netgene-cli` | ✅ | Comandos `gene`, `agent`, `store`, `llm`, `p2p`, `wasm`, `vault`. | — |
+| `netgene-wasm` | ✅ | **Executa** módulos assinados (Ed25519) por um autor confiável, com wasmtime 36 LTS, limite de CPU (fuel) e de memória, e sem imports de host (sem WASI, rede ou arquivos). | A ABI v1 é mínima (`run() -> i32`) e ainda não recebe entrada. |
+| `netgene-vault` | 🧪 | Cifra arquivos em pedaços com AES-256-GCM. A chave fica no cofre do sistema e **sobrevive a reinícios**. Cada pedaço é ligado ao arquivo, à posição e ao total (AAD). | Só local: ainda não há replicação entre dispositivos. Arquivos de versões ≤ 0.3 não podem ser lidos (a chave antiga se perdia). |
+| `netgene-desktop` | 🧪 | Painel de nós, eventos, agentes, marketplace (assina com uma Gene local), vault e terminal de intenções. | Sem autenticação local (passkeys reais estão previstos). |
+| `netgene-cli` | ✅ | Comandos `gene` (init, spawn, verify, export, import), `agent` (dispatch, publish, market), `store`, `llm`, `p2p`, `wasm` (sign, run) e `vault`. | — |
 
 **Removido na versão 0.3.0:** os módulos quântico/QAOA, QPU, BCI neural, DAO, TPM, eBPF, Kubernetes, IoT lite, cloud mesh, builder, TUI e o "FHE". Eles eram simulados (valores fixos ou verificações que sempre aceitavam) e davam garantias que não existiam. O histórico do git preserva o código. Alguns podem voltar quando houver uma implementação real (por exemplo, eBPF com `aya` ou TPM com `tss-esapi`). O motivo de cada remoção está em [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md).
 
@@ -78,8 +78,10 @@ cargo run -p netgene-cli -- gene init --name minha-identidade
 ```
 
 ```bash
-cargo run -p netgene-cli -- p2p listen --port 7777
+cargo run -p netgene-cli -- p2p listen --gene <ID-da-gene> --port 7777
 ```
+
+O ID aparece em `gene init`. Outros nós entram se forem sub-genes da mesma Master (`gene spawn`, depois `gene export` e `gene import` no outro dispositivo).
 
 ```bash
 cd netgene-desktop && npm install && npm run tauri dev
@@ -98,7 +100,7 @@ docker build -t netgene netgene-core
 O plano completo está em [ROADMAP.md](ROADMAP.md). Resumo:
 
 1. **Fase 0 (concluída):** higiene do repositório, CI funcional, licença e documentação honesta.
-2. **Fase 1:** fechar as falhas críticas (persistência da chave do vault, assinatura WASM verificada, sanitização do marketplace, chaves privadas cifradas, autorização de peers, passkeys reais).
+2. **Fase 1 (concluída, v0.4.0):** chaves no cofre do sistema, vault persistente e autenticado, WASM assinado e executado de fato, marketplace assinado, P2P com identidade Gene e allowlist.
 3. **Fase 2:** núcleo real. Identidade híbrida pós-quântica (Ed25519 + ML-DSA), malha autenticada, runtime WASM com permissões, motor de políticas para as ações do LLM e `redb`.
 4. **Fase 3:** produto. Marketplace assinado, app mobile, eBPF no Linux, SSO e integrações empresariais.
 
@@ -106,7 +108,7 @@ O plano completo está em [ROADMAP.md](ROADMAP.md). Resumo:
 
 ## Segurança
 
-Não use o NetGene OS para proteger dados reais antes da Fase 1. Para reportar uma vulnerabilidade, abra uma *security advisory* privada no GitHub em vez de uma issue pública.
+O NetGene OS ainda não passou por auditoria de segurança externa. Use com cautela antes disso. Para reportar uma vulnerabilidade, abra uma *security advisory* privada no GitHub em vez de uma issue pública.
 
 ## Licença
 

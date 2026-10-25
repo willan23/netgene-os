@@ -10,6 +10,13 @@ interface AgentManifest {
     description: string;
     author: string;
     capabilities: string[];
+    publisher_gene_id: string;
+}
+
+interface Gene {
+    id: string;
+    name: string;
+    short_fp: string;
 }
 
 export function MarketplaceView() {
@@ -17,8 +24,9 @@ export function MarketplaceView() {
     const [installing, setInstalling] = useState<string | null>(null);
     const [installedIds, setInstalledIds] = useState<string[]>([]);
     const [showPublish, setShowPublish] = useState(false);
+    const [genes, setGenes] = useState<Gene[]>([]);
     const [formData, setFormData] = useState({
-        id: '', name: '', version: '1.0.0', description: '', author: '', capabilities: ''
+        geneId: '', id: '', name: '', version: '1.0.0', description: '', capabilities: ''
     });
 
     const setStoreAgents = useStore(state => state.setAgents);
@@ -31,6 +39,9 @@ export function MarketplaceView() {
         try {
             const result = await invoke<AgentManifest[]>('list_marketplace_agents');
             setAgents(result);
+
+            const localGenes = await invoke<Gene[]>('list_genes');
+            setGenes(localGenes);
 
             const activeAgents: any[] = await invoke('get_agents_state');
             const activeTypes = activeAgents.map(a => a.agent_type);
@@ -56,23 +67,22 @@ export function MarketplaceView() {
     };
 
     const handlePublish = async () => {
-        if (!formData.id || !formData.name) return;
-        const agent = {
-            id: formData.id,
-            name: formData.name,
-            version: formData.version,
-            description: formData.description,
-            author: formData.author,
-            capabilities: formData.capabilities.split(',').map(s => s.trim()).filter(Boolean)
-        };
+        if (!formData.geneId || !formData.id || !formData.name) return;
         try {
-            await invoke('publish_agent', { jsonContent: JSON.stringify(agent) });
+            await invoke('publish_agent', {
+                geneId: formData.geneId,
+                id: formData.id,
+                name: formData.name,
+                version: formData.version,
+                description: formData.description,
+                capabilities: formData.capabilities.split(',').map(s => s.trim()).filter(Boolean)
+            });
             setShowPublish(false);
-            setFormData({ id: '', name: '', version: '1.0.0', description: '', author: '', capabilities: '' });
+            setFormData({ geneId: '', id: '', name: '', version: '1.0.0', description: '', capabilities: '' });
             loadAgents();
         } catch (error) {
             console.error("Failed to publish agent", error);
-            alert("Failed to publish agent.");
+            alert("Failed to publish agent: " + error);
         }
     };
 
@@ -102,24 +112,27 @@ export function MarketplaceView() {
                         <X size={20} />
                     </button>
                     <h2 className="text-lg font-bold text-cyan-300 mb-2">Publish New Agent</h2>
-                    <p className="text-sm text-slate-400 mb-4">Preencha os dados abaixo para publicar o seu novo BDI Agent na rede.</p>
+                    <p className="text-sm text-slate-400 mb-4">O manifesto é assinado com a chave da Gene escolhida (guardada no cofre do sistema operativo).</p>
                     
                     <div className="grid grid-cols-2 gap-4 mb-4 text-sm text-slate-300">
+                        <div className="col-span-2">
+                            <label className="block mb-1 text-slate-400">Gene que assina</label>
+                            <select className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" value={formData.geneId} onChange={e => setFormData({...formData, geneId: e.target.value})}>
+                                <option value="">{genes.length === 0 ? 'Nenhuma Gene local — crie com `netgene gene init`' : 'Escolha uma Gene'}</option>
+                                {genes.map(g => <option key={g.id} value={g.id}>{g.name} ({g.short_fp})</option>)}
+                            </select>
+                        </div>
                         <div>
-                            <label className="block mb-1 text-slate-400">Agent ID</label>
-                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="ex: crypto-trader" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} />
+                            <label className="block mb-1 text-slate-400">Agent ID (a-z, 0-9, -)</label>
+                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="ex: log-summarizer" value={formData.id} onChange={e => setFormData({...formData, id: e.target.value})} />
                         </div>
                         <div>
                             <label className="block mb-1 text-slate-400">Nome</label>
-                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="ex: Crypto Trader Agent" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="ex: Log Summarizer" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                         </div>
                         <div>
                             <label className="block mb-1 text-slate-400">Versão</label>
                             <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="1.0.0" value={formData.version} onChange={e => setFormData({...formData, version: e.target.value})} />
-                        </div>
-                        <div>
-                            <label className="block mb-1 text-slate-400">Autor</label>
-                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="Seu nome" value={formData.author} onChange={e => setFormData({...formData, author: e.target.value})} />
                         </div>
                         <div className="col-span-2">
                             <label className="block mb-1 text-slate-400">Descrição</label>
@@ -127,7 +140,7 @@ export function MarketplaceView() {
                         </div>
                         <div className="col-span-2">
                             <label className="block mb-1 text-slate-400">Capacidades (separadas por vírgula)</label>
-                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="ex: routing, optimization, crypto, data-mining" value={formData.capabilities} onChange={e => setFormData({...formData, capabilities: e.target.value})} />
+                            <input type="text" className="w-full bg-slate-950 border border-slate-700 rounded p-2 focus:border-cyan-500 outline-none" placeholder="ex: logs.read, llm.chat" value={formData.capabilities} onChange={e => setFormData({...formData, capabilities: e.target.value})} />
                         </div>
                     </div>
                     

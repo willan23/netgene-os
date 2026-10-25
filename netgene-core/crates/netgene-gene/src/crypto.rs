@@ -66,6 +66,19 @@ impl GeneKeyPair {
         &self.pkcs8
     }
 
+    /// The raw 32-byte Ed25519 seed, e.g. to derive the node's libp2p identity
+    /// from its Gene. Only supports the PKCS#8 v2 layout produced by `ring`.
+    pub fn ed25519_seed(&self) -> Result<Zeroizing<[u8; 32]>> {
+        // PKCS#8 v2 (RFC 8410) prefix: SEQUENCE, version 1, AlgorithmIdentifier(Ed25519), OCTET STRING(OCTET STRING(32)).
+        const PREFIX: [u8; 16] = [0x30, 0x51, 0x02, 0x01, 0x01, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
+        if self.pkcs8.len() < 48 || self.pkcs8[..16] != PREFIX {
+            anyhow::bail!("Unsupported Ed25519 PKCS#8 layout");
+        }
+        let mut seed = Zeroizing::new([0u8; 32]);
+        seed.copy_from_slice(&self.pkcs8[16..48]);
+        Ok(seed)
+    }
+
     /// Base64-encode the public key for display/storage.
     pub fn public_key_b64(&self) -> String {
         BASE64.encode(&self.pub_key)
@@ -107,6 +120,14 @@ mod tests {
         assert!(verify_signature(kp.public_key_bytes(), msg, &sig));
         // Tampered message should fail
         assert!(!verify_signature(kp.public_key_bytes(), b"tampered", &sig));
+    }
+
+    #[test]
+    fn test_ed25519_seed_roundtrip() {
+        let kp = GeneKeyPair::generate().unwrap();
+        let seed = kp.ed25519_seed().unwrap();
+        let rebuilt = Ed25519KeyPair::from_seed_unchecked(seed.as_ref()).unwrap();
+        assert_eq!(rebuilt.public_key().as_ref(), kp.public_key_bytes());
     }
 
     #[test]

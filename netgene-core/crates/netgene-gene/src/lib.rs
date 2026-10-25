@@ -8,18 +8,21 @@
 //! - **Gene Tokens**: Signed authorization tokens
 //!
 //! ## Security
-//! Uses Ed25519 signatures (ring) + SHA3-256 fingerprints.
-//! Designed to be upgraded to Post-Quantum (ML-KEM/Dilithium) in Phase 2.
+//! Uses Ed25519 signatures (ring) + SHA3-256 fingerprints. Private keys live in
+//! the OS keystore (see [`secret`]). Hybrid post-quantum signatures are planned
+//! for Phase 2 (see ROADMAP.md).
 
 pub mod crypto;
 pub mod identity;
 pub mod token;
 pub mod storage;
+pub mod secret;
 pub mod error;
 
 pub use identity::{NetGene, GeneRole, GeneStatus};
 pub use error::GeneError;
 pub use token::GeneToken;
+pub use secret::{SecretStore, OsKeyring, MemorySecretStore};
 
 /// NetGene OS version string
 pub const NETGENE_VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -5,7 +5,9 @@
 pub mod events;
 pub mod behaviour;
 pub mod node;
+pub mod identity;
 
 pub use events::*;
 pub use behaviour::*;
 pub use node::*;
+pub use identity::*;

@@ -13,15 +13,19 @@ Base: [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md). Cada fase só começa quando
 - [x] Fazer o README mostrar o estado real de cada módulo.
 - [x] Desktop: CSP ativada, telemetria sem números inventados e o estado do vault corrigido (tipo de `Mutex` divergente).
 
-## Fase 1: Fechar as falhas críticas
+## Fase 1: Fechar as falhas críticas ✅ (v0.4.0)
 
-- [ ] **Vault:** derivar a chave da identidade Gene e persistir selada no keystore do sistema operacional. Usar AAD por chunk (`file_id` + índice).
-- [ ] **WASM:** verificar a assinatura Ed25519 do módulo com a chave do autor. Executar de fato com fuel, `StoreLimits` e timeout. Remover o fallback que inventa bytes.
-- [ ] **Marketplace:** validar `id` (só `[a-z0-9-]`), exigir manifesto assinado e verificar a assinatura na instalação.
-- [ ] **Gene:** cifrar a chave privada em repouso (keystore do sistema operacional, ou senha com Argon2id).
-- [ ] **P2P:** `ValidationMode::Strict`, allowlist de PeerId assinada pelo Master e vínculo PeerId ↔ Gene.
-- [ ] **Passkeys:** `webauthn-rs` para confirmar ações destrutivas.
-- [ ] **CI:** `cargo audit`, `cargo deny` e `clippy -D warnings`.
+- [x] **Gene:** a chave privada sai do disco e vai para o cofre do sistema (crate `keyring`), com migração automática dos arquivos `.key` antigos. A assinatura de linhagem agora é guardada e verificável (`verify_lineage`).
+- [x] **Vault:** a chave de 256 bits é criada uma vez e fica no cofre do sistema. Cada pedaço usa AAD (`file_id` + índice + total) e um byte de versão do formato. Tamanho e metadados são conferidos na leitura.
+- [x] **WASM:** os módulos são assinados por uma Gene e só rodam se o autor estiver na lista de confiança. Executam de fato com fuel, limite de memória e nenhum import de host. O fallback que inventava bytes foi removido. O wasmtime passou de 18 (que **abortava o processo** em qualquer trap) para 36 LTS.
+- [x] **Marketplace:** ids validados (`[a-z0-9-]`, sem path traversal), manifestos assinados e verificados ao publicar, listar e instalar. Os agentes de demonstração falsos foram removidos.
+- [x] **P2P:** `ValidationMode::Strict` com aceitação no nível da aplicação, PeerId derivado da Gene e allowlist formada pela Master e por suas sub-genes com linhagem válida.
+- [x] **CLI:** logs vão para stderr (o `--json` fica limpo) e há um teste de `debug_assert` do clap.
+- [x] **CI:** `cargo audit` adicionado.
+- [ ] **Passkeys (adiado):** `webauthn-rs` exige uma origem HTTPS ou `localhost` no WebView do Tauri. Fica junto do motor de políticas na Fase 2 (a tela de bloqueio falsa já foi removida na Fase 0).
+- [ ] **libp2p 0.54 → 0.57:** remove os avisos do `cargo audit` em `hickory-proto`, `rustls-webpki` 0.101, `ring` 0.16 e `h2` 0.3 (transitivos).
+- [ ] **CI:** `cargo deny` e `clippy -D warnings`.
+- [ ] **Linux:** validar o build e o cofre (Secret Service) no Docker e no CI.
 
 ## Fase 2: Núcleo real
 
