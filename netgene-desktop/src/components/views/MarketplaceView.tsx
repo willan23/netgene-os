@@ -13,6 +13,13 @@ interface AgentManifest {
     publisher_gene_id: string;
 }
 
+interface Reputation {
+    score: number | null;
+    trusted_reviews: number;
+    untrusted_reviews: number;
+    rejected_reviews: number;
+}
+
 interface Gene {
     id: string;
     name: string;
@@ -25,6 +32,7 @@ export function MarketplaceView() {
     const [installedIds, setInstalledIds] = useState<string[]>([]);
     const [showPublish, setShowPublish] = useState(false);
     const [genes, setGenes] = useState<Gene[]>([]);
+    const [reputations, setReputations] = useState<Record<string, Reputation>>({});
     const [formData, setFormData] = useState({
         geneId: '', id: '', name: '', version: '1.0.0', description: '', capabilities: ''
     });
@@ -42,6 +50,8 @@ export function MarketplaceView() {
 
             const localGenes = await invoke<Gene[]>('list_genes');
             setGenes(localGenes);
+
+            setReputations(await invoke<Record<string, Reputation>>('list_agent_reputations'));
 
             const activeAgents: any[] = await invoke('get_agents_state');
             const activeTypes = activeAgents.map(a => a.agent_type);
@@ -162,7 +172,14 @@ export function MarketplaceView() {
                             <div className="p-3 bg-slate-800 rounded-lg">
                                 {agent.id.includes('guard') ? <Shield className="text-emerald-400" size={24} /> : <Cpu className="text-purple-400" size={24} />}
                             </div>
-                            <span className="text-xs font-mono text-slate-500 bg-slate-950 px-2 py-1 rounded">v{agent.version}</span>
+                            <div className="flex flex-col items-end gap-1">
+                                <span className="text-xs font-mono text-slate-500 bg-slate-950 px-2 py-1 rounded">v{agent.version}</span>
+                                <span className="text-xs font-mono text-yellow-400" title={`${reputations[agent.id]?.untrusted_reviews ?? 0} avaliações de fora da sua linhagem não contam`}>
+                                    {reputations[agent.id]?.score != null
+                                        ? `★ ${reputations[agent.id]!.score!.toFixed(1)} (${reputations[agent.id]!.trusted_reviews})`
+                                        : '★ sem avaliações confiáveis'}
+                                </span>
+                            </div>
                         </div>
                         
                         <h3 className="text-lg font-bold text-white mb-1">{agent.name}</h3>

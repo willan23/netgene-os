@@ -1,0 +1,42 @@
+# NetGene OS headless node (systemd)
+#
+#   sudo useradd --system --create-home --home-dir /var/lib/netgene netgene
+#   sudo install -m 0755 target/release/netgene /usr/local/bin/netgene
+#   sudo install -d -m 0700 -o netgene /etc/netgene
+#   echo -n 'a-long-passphrase' | sudo tee /etc/netgene/passphrase >/dev/null && sudo chown netgene /etc/netgene/passphrase && sudo chmod 0400 /etc/netgene/passphrase
+#   sudo -u netgene env NETGENE_SECRET_STORE=file NETGENE_SECRET_PASSPHRASE_FILE=/etc/netgene/passphrase HOME=/var/lib/netgene netgene gene init --name node-01
+#   echo 'NETGENE_GENE_ID=<id printed above>' | sudo tee /etc/netgene/node.env
+#   sudo cp deploy/netgene-node.service /etc/systemd/system/ && sudo systemctl enable --now netgene-node
+
+[Unit]
+Description=NetGene OS mesh node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=netgene
+Environment=HOME=/var/lib/netgene
+Environment=NETGENE_SECRET_STORE=file
+Environment=NETGENE_SECRET_PASSPHRASE_FILE=/etc/netgene/passphrase
+Environment=RUST_LOG=info
+EnvironmentFile=/etc/netgene/node.env
+ExecStart=/usr/local/bin/netgene p2p listen --gene ${NETGENE_GENE_ID} --port 7777
+Restart=on-failure
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/netgene
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

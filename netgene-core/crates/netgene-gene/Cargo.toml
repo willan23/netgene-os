@@ -34,5 +34,3 @@ keyring = { version = "3.6", features = ["sync-secret-service", "crypto-rust", "
 [dev-dependencies]
 tempfile = "3"
 
-[target.'cfg(not(any(windows, target_os = "macos", target_os = "linux")))'.dependencies]
-keyring = "3.6"

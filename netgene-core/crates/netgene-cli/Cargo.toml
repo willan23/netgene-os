@@ -23,6 +23,9 @@ netgene-gene = { workspace = true }
 netgene-kernel = { workspace = true }
 netgene-policy = { workspace = true }
 netgene-presence = { workspace = true }
+netgene-enterprise = { workspace = true }
+netgene-ebpf = { workspace = true }
+netgene-safeguard = { workspace = true }
 netgene-store = { workspace = true }
 netgene-llm = { workspace = true }
 netgene-p2p = { workspace = true }

@@ -6,3 +6,4 @@ pub mod p2p_cmd;
 pub mod wasm_cmd;
 pub mod vault_cmd;
 pub mod grants;
+pub mod ebpf_cmd;

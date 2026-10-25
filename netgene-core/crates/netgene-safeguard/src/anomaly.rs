@@ -72,20 +72,26 @@ impl AnomalyDetector {
             .entry(metric.to_string())
             .or_insert_with(VecDeque::new);
 
+        // Score the value against the baseline *before* adding it: including
+        // the outlier in its own baseline caps the z-score at (n-1)/sqrt(n),
+        // so a single spike could never cross the threshold with small windows.
+        let baseline: Vec<f64> = window.iter().copied().collect();
         window.push_back(value);
         if window.len() > self.window_size {
             window.pop_front();
         }
 
-        if window.len() < 10 {
+        if baseline.len() < 10 {
             return None; // Not enough data
         }
 
-        let mean = window.iter().sum::<f64>() / window.len() as f64;
-        let variance = window.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / window.len() as f64;
-        let std_dev = variance.sqrt();
+        let mean = baseline.iter().sum::<f64>() / baseline.len() as f64;
+        let variance = baseline.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / baseline.len() as f64;
+        // Floor on the spread: a flat baseline still flags a real jump, but
+        // not a ±10% wobble.
+        let std_dev = variance.sqrt().max(mean.abs() * 0.10).max(1e-6);
 
-        if std_dev < 1e-10 { return None; }
+        if (value - mean).abs() < 1e-10 { return None; }
 
         let z_score = (value - mean).abs() / std_dev;
 
@@ -142,6 +148,28 @@ impl AnomalyDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression (found with real XDP counters): with a 10-sample window a
+    /// single spike was part of its own baseline and could never exceed z = 3.
+    #[test]
+    fn test_single_spike_detected_with_small_window() {
+        let mut d = AnomalyDetector::new(10, 3.0);
+        for v in [2.0, 6.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0] {
+            assert!(d.ingest("pps", v).is_none());
+        }
+        let event = d.ingest("pps", 6008.0).expect("a 750x spike must be flagged");
+        assert_eq!(event.severity, AnomalySeverity::Critical);
+    }
+
+    #[test]
+    fn test_flat_baseline_tolerates_small_wobble() {
+        let mut d = AnomalyDetector::new(10, 3.0);
+        for _ in 0..10 {
+            d.ingest("pps", 8.0);
+        }
+        assert!(d.ingest("pps", 9.0).is_none(), "8 → 9 is noise, not an attack");
+        assert!(d.ingest("pps", 80.0).is_some());
+    }
 
     /// Helper: warm up detector with `n` normal values around mean.
     fn warm_up(det: &mut AnomalyDetector, metric: &str, n: usize, mean: f64) {

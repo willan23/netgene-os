@@ -5,7 +5,6 @@ use anyhow::Result;
 use super::grants;
 use netgene_gene::{
     identity::NetGene,
-    secret::OsKeyring,
     CapabilityToken, RevocationList,
     storage::{default_gene_dir, save_gene, list_genes, load_gene},
 };
@@ -73,11 +72,23 @@ pub enum GeneCommand {
         #[arg(long)]
         gene: String,
     },
+    /// Grant capabilities from a corporate OIDC ID token (mapping in ~/.netgene/enterprise.json)
+    GrantOidc {
+        /// Issuing gene (the subject's parent, normally the Master Gene)
+        #[arg(long)]
+        issuer: String,
+        /// Gene that receives the capabilities
+        #[arg(long)]
+        subject: String,
+        /// The ID token (JWT), or @path to a file containing it
+        #[arg(long)]
+        id_token: String,
+    },
 }
 
 pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
     let dir = default_gene_dir();
-    let secrets = OsKeyring::new();
+    let secrets = netgene_gene::default_store()?;
 
     match cmd {
         GeneCommand::Init { name } => {
@@ -261,6 +272,56 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
             enrollment.save(&grants::presence_dir())?;
             println!("✅ Presence key enrolled for {} ({})", gene.name, enrollment.method);
             println!("   Set \"require_user_presence\": true in ~/.netgene/policy.json to require it for confirmations.");
+        }
+
+        GeneCommand::GrantOidc { issuer, subject, id_token } => {
+            let config = netgene_enterprise::OidcConfig::load(&grants::netgene_home().join("enterprise.json"))?;
+            let token = match id_token.strip_prefix('@') {
+                Some(path) => std::fs::read_to_string(path)?,
+                None => id_token,
+            };
+            let jwks = netgene_enterprise::JwkSet::load(&config.jwks).await?;
+            let now = chrono::Utc::now();
+            let identity = netgene_enterprise::verify_id_token(&config, &jwks, &token, now)?;
+            let caps = netgene_enterprise::capabilities_for(&config, &identity);
+            if caps.is_empty() {
+                anyhow::bail!("ID token for {} has no role mapped to NetGene capabilities", identity.subject);
+            }
+
+            let (issuer_gene, issuer_kp) = load_gene(&issuer, &dir, &secrets)?;
+            let subject_gene = list_genes(&dir)?
+                .into_iter()
+                .find(|g| g.id.to_string() == subject)
+                .ok_or_else(|| anyhow::anyhow!("Subject gene {} not found", subject))?;
+            if !subject_gene.verify_lineage(&issuer_gene) {
+                anyhow::bail!("Only the verified parent of a gene can grant it capabilities");
+            }
+            let ttl = netgene_enterprise::grant_ttl(&config, &identity, now);
+            let token = CapabilityToken::issue(&issuer_gene, &issuer_kp, &subject_gene, caps, ttl)?;
+            std::fs::create_dir_all(grants::tokens_dir())?;
+            std::fs::write(grants::tokens_dir().join(format!("{}.json", token.claims.token_id)), serde_json::to_string_pretty(&token)?)?;
+
+            // Record who the capabilities came from in the audit log.
+            let mut audit = netgene_policy::AuditLog::open(grants::netgene_home().join("audit.jsonl"), issuer_kp.try_clone()?)?;
+            audit.append(netgene_policy::AuditRecord {
+                actor_gene_id: issuer_gene.id.to_string(),
+                input: format!("oidc grant for {}", identity.email.clone().unwrap_or_else(|| identity.subject.clone())),
+                action: Some("gene.grant".into()),
+                params: serde_json::json!({
+                    "token_id": token.claims.token_id,
+                    "subject_gene": subject_gene.id,
+                    "oidc_issuer": config.issuer,
+                    "oidc_subject": identity.subject,
+                    "roles": identity.roles,
+                    "capabilities": token.claims.capabilities,
+                }),
+                decision: "granted".into(),
+                detail: format!("expires {}", token.claims.expires_at),
+            })?;
+
+            println!("🏢 {} ({}) verified by {}", identity.email.as_deref().unwrap_or("-"), identity.subject, config.issuer);
+            println!("🎫 Token {} → {} [{}] until {}", token.claims.token_id, subject_gene.name,
+                token.claims.capabilities.join(", "), token.claims.expires_at.format("%Y-%m-%d %H:%M UTC"));
         }
 
         GeneCommand::Import { file } => {

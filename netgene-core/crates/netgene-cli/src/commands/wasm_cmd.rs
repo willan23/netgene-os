@@ -4,7 +4,6 @@ use clap::Subcommand;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use netgene_gene::{
-    secret::OsKeyring,
     storage::{default_gene_dir, list_genes, load_gene},
     HybridPublicKey,
 };
@@ -61,7 +60,7 @@ pub async fn run(cmd: WasmCommand) -> Result<()> {
     match cmd {
         WasmCommand::Sign { file, gene, name, version, out, permissions } => {
             let wasm = std::fs::read(&file).with_context(|| format!("Cannot read {}", file.display()))?;
-            let (author, kp) = load_gene(&gene, &dir, &OsKeyring::new())?;
+            let (author, kp) = load_gene(&gene, &dir, &netgene_gene::default_store()?)?;
             let module = GeneModule::sign(&name, &version, &wasm, permissions, &author, &kp)?;
 
             let out = out.unwrap_or_else(|| file.with_extension("gene-module.json"));

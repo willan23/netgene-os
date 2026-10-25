@@ -1,10 +1,11 @@
 use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel, marketplace::{Marketplace, AgentManifest}};
 use netgene_policy::{AuditEntry, Policy};
 use netgene_presence::PresenceEnrollment;
+use netgene_kernel::reputation::{Reputation, ReviewStore};
 use netgene_store::{NetGeneStore, models::{StoredEvent, StoredNode}};
 use netgene_llm::OllamaClient;
 use netgene_vault::{NetGeneVault, VaultFile};
-use netgene_gene::{NetGene, OsKeyring, storage::{default_gene_dir, load_gene}};
+use netgene_gene::{HybridPublicKey, NetGene, storage::{default_gene_dir, load_gene}};
 use chrono::Utc;
 use uuid::Uuid;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -87,10 +88,11 @@ fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<(KernelConfig,
     let policy = Policy::load_or_default(&netgene_dir.join("policy.json"))?;
     let audit_path = Some(netgene_dir.join("audit.jsonl"));
     let gene_dir = default_gene_dir();
+    let secrets = netgene_gene::default_store()?;
     let master = netgene_gene::storage::list_genes(&gene_dir)?
         .into_iter()
         .filter(|g| g.role == netgene_gene::GeneRole::Master)
-        .find_map(|g| load_gene(&g.id.to_string(), &gene_dir, &OsKeyring::new()).ok());
+        .find_map(|g| load_gene(&g.id.to_string(), &gene_dir, &secrets).ok());
 
     Ok(match master {
         Some((operator, operator_kp)) => {
@@ -166,6 +168,19 @@ fn list_marketplace_agents(marketplace: State<'_, Marketplace>) -> Vec<AgentMani
     marketplace.list_available_agents()
 }
 
+/// Reputation of every marketplace agent, trusting the operator's lineage.
+#[tauri::command]
+fn list_agent_reputations(marketplace: State<'_, Marketplace>, kernel: State<'_, Arc<NetSphereKernel>>) -> Result<std::collections::BTreeMap<String, Reputation>, String> {
+    let genes = netgene_gene::storage::list_genes(&default_gene_dir()).map_err(|e| e.to_string())?;
+    let trusted: Vec<HybridPublicKey> = netgene_gene::storage::trusted_lineage(kernel.operator(), &genes)
+        .iter()
+        .map(HybridPublicKey::from_gene)
+        .collect();
+    ReviewStore::default()
+        .reputations(&marketplace.list_available_agents(), &trusted)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn install_agent(marketplace: State<'_, Marketplace>, kernel: State<'_, Arc<NetSphereKernel>>, agent_id: String) -> Result<AgentManifest, String> {
     let manifest = marketplace.install_agent(&agent_id).map_err(|e| e.to_string())?;
@@ -190,7 +205,7 @@ fn publish_agent(
     description: String,
     capabilities: Vec<String>,
 ) -> Result<AgentManifest, String> {
-    let (publisher, kp) = load_gene(&gene_id, &default_gene_dir(), &OsKeyring::new()).map_err(|e| e.to_string())?;
+    let (publisher, kp) = load_gene(&gene_id, &default_gene_dir(), &netgene_gene::default_store().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     let manifest = AgentManifest::new_signed(&id, &name, &version, &description, capabilities, &publisher, &kp)
         .map_err(|e| e.to_string())?;
     marketplace.publish_manifest(&manifest).map_err(|e| e.to_string())?;
@@ -254,6 +269,7 @@ pub fn run() {
             list_marketplace_agents,
             install_agent,
             publish_agent,
+            list_agent_reputations,
             list_genes,
             vault_store_file,
             vault_list_files,
@@ -280,8 +296,11 @@ pub fn run() {
             start_telemetry(app.handle().clone());
 
             let vault_path = app.path().home_dir()?.join(".netgene").join("vault");
-            let vault = NetGeneVault::open(vault_path, &OsKeyring::new()).expect("Failed to initialize Vault");
-            app.manage(Arc::new(Mutex::new(vault)));
+            // Without a usable secret store (e.g. on mobile, for now) the app runs without the vault.
+            match netgene_gene::default_store().and_then(|secrets| NetGeneVault::open(vault_path, &secrets)) {
+                Ok(vault) => { app.manage(Arc::new(Mutex::new(vault))); }
+                Err(e) => eprintln!("Vault disabled: {}", e),
+            }
             
             Ok(())
         })

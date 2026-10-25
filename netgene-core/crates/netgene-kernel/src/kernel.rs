@@ -322,6 +322,11 @@ impl NetSphereKernel {
     }
 
     /// The policy currently enforced.
+    /// The Gene the kernel acts as.
+    pub fn operator(&self) -> &NetGene {
+        &self.operator
+    }
+
     pub fn policy(&self) -> &Policy {
         self.policy.policy()
     }

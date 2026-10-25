@@ -1,0 +1,39 @@
+# NetGene OS — self-hosted headless node
+#
+# 1. Put a passphrase (12+ characters) in deploy/secrets/netgene_passphrase
+# 2. Create the node identity inside the volume:
+#      docker compose -f deploy/docker-compose.yml run --rm netgene gene init --name my-node --json
+# 3. Put the printed "id" in NETGENE_GENE_ID below (or in a .env file) and start:
+#      docker compose -f deploy/docker-compose.yml up -d
+#
+# Keys live in the encrypted file store (no Secret Service in containers):
+# PBKDF2-HMAC-SHA256 + AES-256-GCM, passphrase from the Docker secret.
+
+services:
+  netgene:
+    build:
+      context: ../netgene-core
+    image: netgene-os:0.8.0
+    restart: unless-stopped
+    environment:
+      NETGENE_SECRET_STORE: file
+      NETGENE_SECRET_PASSPHRASE_FILE: /run/secrets/netgene_passphrase
+      NETGENE_GENE_ID: ${NETGENE_GENE_ID:-}
+      RUST_LOG: info
+    secrets:
+      - netgene_passphrase
+    volumes:
+      - netgene-data:/home/netgene/.netgene
+    ports:
+      - "7777:7777"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  netgene_passphrase:
+    file: ./secrets/netgene_passphrase
+
+volumes:
+  netgene-data:
