@@ -2,8 +2,8 @@ import { create } from 'zustand';
 
 interface NetGeneState {
   health: string;
-  uptime: number;
-  latency: number;
+  uptime_seconds: number;
+  known_nodes: number;
   anomalies: number;
   logs: string[];
   
@@ -11,7 +11,6 @@ interface NetGeneState {
   activeTab: string;
   agents: any[];
   nodes: any[];
-  quantum: any;
   safeguard: any;
   topology: any[];
 
@@ -20,22 +19,20 @@ interface NetGeneState {
   setLogs: (logs: string[]) => void;
   setActiveTab: (tab: string) => void;
   setAgents: (agents: any[]) => void;
-  setQuantum: (quantum: any) => void;
   setSafeguard: (safeguard: any) => void;
   setTopology: (topology: any[]) => void;
 }
 
 export const useStore = create<NetGeneState>((set) => ({
   health: 'OFFLINE',
-  uptime: 0,
-  latency: 0,
+  uptime_seconds: 0,
+  known_nodes: 0,
   anomalies: 0,
   logs: ['[SYSTEM] NetGene Desktop initializing...'],
   
   activeTab: 'dashboard',
   agents: [],
   nodes: [],
-  quantum: null,
   safeguard: null,
   topology: [],
 
@@ -44,7 +41,6 @@ export const useStore = create<NetGeneState>((set) => ({
   setLogs: (logs) => set(() => ({ logs })),
   setActiveTab: (activeTab) => set(() => ({ activeTab })),
   setAgents: (agents) => set(() => ({ agents })),
-  setQuantum: (quantum) => set(() => ({ quantum })),
   setSafeguard: (safeguard) => set(() => ({ safeguard })),
   setTopology: (topology) => set(() => ({ topology })),
 }));

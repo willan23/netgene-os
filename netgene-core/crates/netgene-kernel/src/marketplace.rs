@@ -56,16 +56,6 @@ impl Marketplace {
                 capabilities: vec!["federated-learning".into(), "sync".into()],
             };
             let _ = fs::write(path.join("swarm-coordinator.json"), serde_json::to_string_pretty(&swarm_coord).unwrap());
-
-            let trader = AgentManifest {
-                id: "crypto-trader-bot".into(),
-                name: "Quantum Arbitrage Trader".into(),
-                version: "0.5.0-beta".into(),
-                description: "Utiliza SQA e QAOA para encontrar rotas de arbitragem em micro-segundos através do Mesh.".into(),
-                author: "DeFi NetGene".into(),
-                capabilities: vec!["defi".into(), "qaoa-arbitrage".into()],
-            };
-            let _ = fs::write(path.join("crypto-trader-bot.json"), serde_json::to_string_pretty(&trader).unwrap());
         }
         
         Self { registry_path: path }

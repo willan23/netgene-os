@@ -20,16 +20,13 @@ pub enum AgentCommand {
 pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
     match cmd {
         AgentCommand::List => {
+            let kernel = NetSphereKernel::boot().await?;
             println!("🤖 Netsphere Kernel Agents");
             println!("{}", "─".repeat(50));
-            let agents = vec![
-                ("BuilderAgent", "builder", "IDLE", "Organic node provisioning"),
-                ("MonitorAgent", "monitor", "MONITORING", "Anomaly detection"),
-                ("OptimizerAgent", "optimizer", "IDLE", "Quantum routing"),
-            ];
-            for (name, atype, status, desc) in agents {
-                println!("  • {} [{}] — {} — {}", name, atype, status, desc);
+            for agent in kernel.agent_list().await {
+                println!("  • {} [{}] — {:?}", agent.name, agent.agent_type, agent.status);
             }
+            kernel.shutdown().await?;
         }
 
         AgentCommand::Dispatch { intent } => {
@@ -47,11 +44,12 @@ pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
         }
 
         AgentCommand::Status => {
-            println!("🟢 Netsphere Kernel: ONLINE");
-            println!("   Agents registered: 3");
-            println!("   Bus: Tokio MPSC (buf=256)");
-            println!("   Memory: KernelMemory (in-process)");
-            println!("   Consensus: Phase 2 (libp2p/Raft)");
+            let kernel = NetSphereKernel::boot().await?;
+            println!("🟢 Netsphere Kernel: ONLINE (in-process)");
+            println!("   Agents registered: {}", kernel.agent_list().await.len());
+            println!("   Bus: Tokio MPSC");
+            println!("   Consensus: none (single process)");
+            kernel.shutdown().await?;
         }
     }
 

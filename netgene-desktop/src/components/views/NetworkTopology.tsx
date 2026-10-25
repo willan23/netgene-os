@@ -67,8 +67,8 @@ export function NetworkTopology() {
               <tr className="border-b border-cyan-neon/20 bg-cyan-neon/5 font-mono text-xs uppercase tracking-wider">
                 <th className="p-4 opacity-70">Node Name / ID</th>
                 <th className="p-4 opacity-70">Address / IP</th>
-                <th className="p-4 opacity-70">Layer</th>
-                <th className="p-4 opacity-70">Capabilities</th>
+                <th className="p-4 opacity-70">Template</th>
+                <th className="p-4 opacity-70">Last Seen</th>
                 <th className="p-4 opacity-70">Status</th>
                 <th className="p-4 opacity-70">Ed25519 Fingerprint</th>
               </tr>
@@ -87,11 +87,11 @@ export function NetworkTopology() {
                       <Cpu size={16} className="text-cyan-400" />
                       {node.name || node.id.substring(0, 12)}
                     </td>
-                    <td className="p-4 text-cyan-300 text-xs">{node.address || '127.0.0.1:8000'}</td>
-                    <td className="p-4 text-fuchsia-400 font-bold">{node.layer || 'Mesh'}</td>
+                    <td className="p-4 text-cyan-300 text-xs">{node.ip}:{node.port}</td>
+                    <td className="p-4 text-fuchsia-400 font-bold">{node.template}</td>
                     <td className="p-4">
                       <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded text-xs">
-                        {node.quantum_enabled ? 'QAOA + ed25519' : 'Standard Node'}
+                        {new Date(node.last_seen).toLocaleString()}
                       </span>
                     </td>
                     <td className="p-4">

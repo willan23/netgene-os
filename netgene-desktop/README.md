@@ -1,7 +1,13 @@
-# Tauri + React + Typescript
+# netgene-desktop
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Aplicativo desktop do NetGene OS (Tauri 2 + React 19 + Vite + Tailwind). Ele usa os crates `netgene-kernel`, `netgene-store`, `netgene-llm` e `netgene-vault` de [`../netgene-core`](../netgene-core).
 
-## Recommended IDE Setup
+```bash
+npm install
+```
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```bash
+npm run tauri dev
+```
+
+Telas: Dashboard (nós conhecidos, eventos, terminal de intenções), Safeguard, Topologia, Agentes, Marketplace e Vault. O estado de cada módulo está no [README da raiz](../README.md#estado-real-de-cada-módulo).

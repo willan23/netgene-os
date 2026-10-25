@@ -24,7 +24,6 @@ pub mod memory;
 pub mod kernel;
 pub mod error;
 pub mod marketplace;
-pub mod crypto;
 
 pub use kernel::NetSphereKernel;
 pub use agent::{Agent, AgentId, AgentStatus, AgentMessage};
@@ -55,7 +54,7 @@ mod tests {
     async fn test_kernel_dispatch_spawn_intent() {
         let kernel = NetSphereKernel::boot().await.unwrap();
         let result = kernel.dispatch_intent("spawn 2 nodes").await.unwrap();
-        assert!(result.contains("Intent dispatched") || result.contains("acknowledged"));
+        assert!(result.contains("Action dispatched"), "unexpected result: {result}");
     }
 
     /// Dispatch an optimization intent — should succeed.
@@ -66,12 +65,12 @@ mod tests {
         assert!(result.contains("dispatched") || result.contains("acknowledged"));
     }
 
-    /// Dispatch an unknown intent — should return a user-facing warning message.
+    /// Dispatch an unknown intent — the rule-based fallback answers with a status query.
     #[tokio::test]
     async fn test_kernel_dispatch_unknown_intent() {
         let kernel = NetSphereKernel::boot().await.unwrap();
         let result = kernel.dispatch_intent("xyzzy plugh").await.unwrap();
-        assert!(result.contains("not recognized") || result.contains("Intent"));
+        assert!(result.contains("Action dispatched"), "unexpected result: {result}");
     }
 
     /// Kernel memory stores and retrieves events.

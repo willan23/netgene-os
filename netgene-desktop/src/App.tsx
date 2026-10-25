@@ -1,24 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useStore } from './store';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/views/DashboardView';
-import { GeneLayer } from './components/views/GeneLayer';
 import { Safeguard } from './components/views/Safeguard';
-import { QuantumModule } from './components/views/QuantumModule';
 import { NetworkTopology } from './components/views/NetworkTopology';
 import { AgentsList } from './components/views/AgentsList';
 import { MarketplaceView } from './components/views/MarketplaceView';
-import { SwarmIntelligence } from './components/views/SwarmIntelligence';
-import { Governance } from './components/views/Governance';
-import { NeuralLink } from './components/views/NeuralLink';
 import { Vault } from './components/views/Vault';
-import { LockScreen } from './components/LockScreen';
 
 function App() {
-  const [isUnlocked, setIsUnlocked] = useState(false);
-  const { activeTab, setMetrics, addLog, setLogs, setAgents, setQuantum, setSafeguard, setTopology } = useStore();
+  const { activeTab, setMetrics, addLog, setLogs, setAgents, setSafeguard, setTopology } = useStore();
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -35,9 +28,6 @@ function App() {
 
         const agents: any[] = await invoke('get_agents_state');
         setAgents(agents);
-
-        const quantum: any = await invoke('get_quantum_status');
-        setQuantum(quantum);
 
         const safeguard: any = await invoke('get_safeguard_metrics');
         setSafeguard(safeguard);
@@ -75,23 +65,14 @@ function App() {
   const renderView = () => {
     switch (activeTab) {
       case 'dashboard': return <DashboardView />;
-      case 'gene': return <GeneLayer />;
       case 'safeguard': return <Safeguard />;
-      case 'quantum': return <QuantumModule />;
-      case 'network': return <NetworkTopology />;
+      case 'topology': return <NetworkTopology />;
       case 'agents': return <AgentsList />;
-      case 'swarm': return <SwarmIntelligence />;
       case 'marketplace': return <MarketplaceView />;
-      case 'governance': return <Governance />;
-      case 'neural': return <NeuralLink />;
       case 'vault': return <Vault />;
       default: return <DashboardView />;
     }
   };
-
-  if (!isUnlocked) {
-    return <LockScreen onUnlock={() => setIsUnlocked(true)} />;
-  }
 
   return (
     <div className="h-screen w-screen bg-background text-cyan-neon flex overflow-hidden font-sans">
@@ -100,13 +81,7 @@ function App() {
         <header className="flex justify-between items-center border-b border-cyan-neon/20 pb-4 mb-6">
           <div>
             <h1 className="text-3xl font-bold tracking-wider uppercase text-shadow-neon">NETGENE OS</h1>
-            <p className="text-xs font-mono opacity-60">v1.0.0 Apex Megastructure // Desktop Terminal</p>
-          </div>
-          <div className="flex gap-4">
-             <div className="text-right">
-               <div className="text-[10px] uppercase font-mono opacity-50">Master Gene</div>
-               <div className="font-mono text-sm text-fuchsia-400">df2dd4dd...b2dc</div>
-             </div>
+            <p className="text-xs font-mono opacity-60">v0.3.0 pre-alpha // Desktop</p>
           </div>
         </header>
 
