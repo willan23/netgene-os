@@ -23,17 +23,20 @@ Base: [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md). Cada fase só começa quando
 - [x] **CLI:** logs vão para stderr (o `--json` fica limpo) e há um teste de `debug_assert` do clap.
 - [x] **CI:** `cargo audit` adicionado.
 - [ ] **Passkeys (adiado):** `webauthn-rs` exige uma origem HTTPS ou `localhost` no WebView do Tauri. Fica junto do motor de políticas na Fase 2 (a tela de bloqueio falsa já foi removida na Fase 0).
-- [ ] **libp2p 0.54 → 0.57:** remove os avisos do `cargo audit` em `hickory-proto`, `rustls-webpki` 0.101, `ring` 0.16 e `h2` 0.3 (transitivos).
+- [x] **libp2p 0.54 → 0.57:** feito na v0.5.0. O `cargo audit` agora reporta 0 vulnerabilidades no core e no desktop.
 - [ ] **CI:** `cargo deny` e `clippy -D warnings`.
 - [ ] **Linux:** validar o build e o cofre (Secret Service) no Docker e no CI.
 
-## Fase 2: Núcleo real
+## Fase 2: Núcleo real (em andamento, v0.5.0)
 
-- [ ] Identidade híbrida pós-quântica: Ed25519 + ML-DSA-65 nas assinaturas e X25519 + ML-KEM-768 na troca de chaves (`aws-lc-rs` ou RustCrypto).
+- [x] **Identidade híbrida pós-quântica:** cada Gene nova tem uma chave Ed25519 e uma ML-DSA-65 (`ml-dsa` da RustCrypto, FIPS 204). A linhagem é assinada pelas duas, e a assinatura PQ cobre as duas chaves do filho, então retirá-la ou trocá-la é detectado. A semente PQ fica no cofre do sistema.
+- [ ] Troca de chaves híbrida X25519 + ML-KEM-768 no transporte P2P (o Noise do libp2p ainda é clássico).
+- [ ] Assinaturas híbridas também nos manifestos do marketplace, nos módulos WASM e no log de auditoria.
 - [ ] Capability tokens assinados com expiração e revogação.
-- [ ] Motor de políticas: o LLM só **propõe**, a política **decide** e as ações sensíveis exigem confirmação.
+- [x] **Motor de políticas (`netgene-policy`):** o LLM só **propõe** e a política **decide**. Há um catálogo de ações (capacidade + risco), regras em `~/.netgene/policy.json` e limites de parâmetros. As ações de escrita exigem confirmação humana (CLI `--confirm`, botão no desktop).
 - [ ] Runtime de agentes em WASM Component Model com permissões declaradas (rede, arquivos, chaves).
-- [ ] Log de auditoria append-only e assinado.
+- [x] **Log de auditoria append-only:** encadeado por SHA3-256 e assinado por entrada. O kernel recusa continuar um log adulterado. CLI: `agent audit`.
+- [ ] Passkeys (`webauthn-rs`) como fator de confirmação das ações `confirm`.
 - [ ] Migrar `sled` para `redb`. Avaliar `automerge` ou `loro` para CRDTs.
 - [ ] Avaliar `iroh` para NAT traversal.
 - [ ] Testes de integração com 3+ nós em Docker e fuzzing com `cargo-fuzz`.

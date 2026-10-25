@@ -71,6 +71,8 @@ pub enum CryptoAlgorithm {
     Ed25519,
     MlKem768,  // Kyber Post-Quantum KEM
     MlDsa65,   // Dilithium Post-Quantum DSA
+    /// Ed25519 and ML-DSA-65 together; both signatures must verify.
+    HybridEd25519MlDsa65,
 }
 
 impl std::fmt::Display for CryptoAlgorithm {
@@ -79,6 +81,7 @@ impl std::fmt::Display for CryptoAlgorithm {
             CryptoAlgorithm::Ed25519 => write!(f, "Ed25519"),
             CryptoAlgorithm::MlKem768 => write!(f, "ML-KEM-768 (Kyber PQC)"),
             CryptoAlgorithm::MlDsa65 => write!(f, "ML-DSA-65 (Dilithium PQC)"),
+            CryptoAlgorithm::HybridEd25519MlDsa65 => write!(f, "Hybrid Ed25519 + ML-DSA-65 (post-quantum)"),
         }
     }
 }
@@ -116,6 +119,18 @@ pub struct NetGene {
     /// Parent's Ed25519 signature over this gene's public key (None for a Master Gene).
     #[serde(default)]
     pub lineage_signature_b64: Option<String>,
+    /// ML-DSA-65 public key (hybrid genes).
+    #[serde(default)]
+    pub pq_public_key_b64: Option<String>,
+    /// Parent's ML-DSA-65 signature over [`NetGene::pq_lineage_payload`].
+    #[serde(default)]
+    pub pq_lineage_signature_b64: Option<String>,
+}
+
+const PQ_LINEAGE_DOMAIN: &[u8] = b"netgene-lineage-mldsa65-v1\0";
+
+fn algorithm_for(kp: &GeneKeyPair) -> CryptoAlgorithm {
+    if kp.pq().is_some() { CryptoAlgorithm::HybridEd25519MlDsa65 } else { CryptoAlgorithm::Ed25519 }
 }
 
 impl NetGene {
@@ -132,7 +147,7 @@ impl NetGene {
             name: name.clone(),
             role: GeneRole::Master,
             status: GeneStatus::Active,
-            algorithm: CryptoAlgorithm::Ed25519,
+            algorithm: algorithm_for(&kp),
             public_key_b64: pk_b64,
             fingerprint: fp.clone(),
             short_fp: sfp.clone(),
@@ -147,6 +162,8 @@ impl NetGene {
                 "network.admin".to_string(),
             ],
             lineage_signature_b64: None,
+            pq_public_key_b64: kp.pq_public_key_b64(),
+            pq_lineage_signature_b64: None,
         };
 
         info!(
@@ -179,13 +196,17 @@ impl NetGene {
 
         // Sign the new gene's public key with parent key to establish lineage
         let lineage_sig = parent_kp.sign(kp.public_key_bytes())?;
+        let pq_pk = kp.pq().map(|pq| pq.public_key_bytes());
+        let pq_lineage_sig = parent_kp
+            .pq()
+            .map(|pq| pq.sign(&Self::pq_lineage_payload(kp.public_key_bytes(), pq_pk.as_deref())));
 
         let gene = NetGene {
             id: Uuid::new_v4(),
             name: name.clone(),
             role: role.clone(),
             status: GeneStatus::Active,
-            algorithm: CryptoAlgorithm::Ed25519,
+            algorithm: algorithm_for(&kp),
             public_key_b64: pk_b64,
             fingerprint: fp,
             short_fp: sfp.clone(),
@@ -194,6 +215,8 @@ impl NetGene {
             description: None,
             capabilities,
             lineage_signature_b64: Some(BASE64.encode(lineage_sig)),
+            pq_public_key_b64: kp.pq_public_key_b64(),
+            pq_lineage_signature_b64: pq_lineage_sig.map(|s| BASE64.encode(s)),
         };
 
         debug!(
@@ -225,7 +248,28 @@ impl NetGene {
         Ok(BASE64.decode(&self.public_key_b64)?)
     }
 
-    /// True if `parent` signed this gene's public key (verifiable lineage).
+    /// Decode this gene's ML-DSA-65 public key, if it has one.
+    pub fn pq_public_key_bytes(&self) -> Result<Option<Vec<u8>>> {
+        self.pq_public_key_b64.as_ref().map(|k| Ok(BASE64.decode(k)?)).transpose()
+    }
+
+    /// Bytes the parent's ML-DSA key signs: both of the child's public keys.
+    pub fn pq_lineage_payload(child_ed_pk: &[u8], child_pq_pk: Option<&[u8]>) -> Vec<u8> {
+        let mut payload = PQ_LINEAGE_DOMAIN.to_vec();
+        payload.extend_from_slice(&(child_ed_pk.len() as u32).to_be_bytes());
+        payload.extend_from_slice(child_ed_pk);
+        if let Some(pq) = child_pq_pk {
+            payload.extend_from_slice(&(pq.len() as u32).to_be_bytes());
+            payload.extend_from_slice(pq);
+        }
+        payload
+    }
+
+    /// True if `parent` signed this gene (verifiable lineage).
+    ///
+    /// The Ed25519 lineage signature must always verify. If the parent has an
+    /// ML-DSA key, the post-quantum lineage signature (covering both of this
+    /// gene's keys) must verify too, so stripping it is not a downgrade path.
     pub fn verify_lineage(&self, parent: &NetGene) -> bool {
         if self.parent_id != Some(parent.id) {
             return false;
@@ -235,8 +279,23 @@ impl NetGene {
         else {
             return false;
         };
-        match BASE64.decode(sig_b64) {
-            Ok(sig) => verify_signature(&parent_pk, &own_pk, &sig),
+        let ed_ok = BASE64.decode(sig_b64).map(|sig| verify_signature(&parent_pk, &own_pk, &sig)).unwrap_or(false);
+        if !ed_ok {
+            return false;
+        }
+
+        match parent.pq_public_key_bytes() {
+            Ok(None) => true,
+            Ok(Some(parent_pq)) => {
+                let (Some(pq_sig_b64), Ok(own_pq)) = (&self.pq_lineage_signature_b64, self.pq_public_key_bytes()) else {
+                    return false;
+                };
+                let payload = Self::pq_lineage_payload(&own_pk, own_pq.as_deref());
+                BASE64
+                    .decode(pq_sig_b64)
+                    .map(|sig| crate::pq::verify_pq(&parent_pq, &payload, &sig))
+                    .unwrap_or(false)
+            }
             Err(_) => false,
         }
     }
@@ -286,6 +345,33 @@ mod tests {
         .unwrap();
         assert_eq!(sub.parent_id, Some(master.id));
         assert_eq!(sub.role, GeneRole::Node);
+        assert_eq!(sub.algorithm, CryptoAlgorithm::HybridEd25519MlDsa65);
+        assert!(sub.pq_public_key_b64.is_some());
+        assert!(sub.verify_lineage(&master));
+    }
+
+    #[test]
+    fn test_pq_lineage_cannot_be_stripped_or_swapped() {
+        let (master, master_kp) = NetGene::generate_master("Master").unwrap();
+        let (sub, _) = NetGene::spawn_sub_gene(&master, &master_kp, "Node", GeneRole::Node, vec![]).unwrap();
+        let (other, _) = NetGene::spawn_sub_gene(&master, &master_kp, "Other", GeneRole::Node, vec![]).unwrap();
+
+        let mut stripped = sub.clone();
+        stripped.pq_lineage_signature_b64 = None;
+        assert!(!stripped.verify_lineage(&master), "downgrade to Ed25519-only must fail");
+
+        let mut swapped = sub.clone();
+        swapped.pq_public_key_b64 = other.pq_public_key_b64.clone();
+        assert!(!swapped.verify_lineage(&master), "replacing the PQ key must fail");
+    }
+
+    #[test]
+    fn test_legacy_ed25519_parent_still_verifies() {
+        let (mut master, master_kp) = NetGene::generate_master("Legacy").unwrap();
+        let ed_only = GeneKeyPair::from_pkcs8(master_kp.pkcs8_bytes().to_vec()).unwrap();
+        master.pq_public_key_b64 = None;
+        let (sub, _) = NetGene::spawn_sub_gene(&master, &ed_only, "Node", GeneRole::Node, vec![]).unwrap();
+        assert!(sub.pq_lineage_signature_b64.is_none());
         assert!(sub.verify_lineage(&master));
     }
 

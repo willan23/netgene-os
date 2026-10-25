@@ -21,6 +21,7 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 netgene-gene = { workspace = true }
 netgene-kernel = { workspace = true }
+netgene-policy = { workspace = true }
 netgene-store = { workspace = true }
 netgene-llm = { workspace = true }
 netgene-p2p = { workspace = true }

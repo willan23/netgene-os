@@ -52,9 +52,7 @@ impl LlmIntentEngine {
 
         if input_lower.contains("spawn") || input_lower.contains("create") || input_lower.contains("provision") {
             let count = extract_number(&input_lower).unwrap_or(1);
-            let template = if input_lower.contains("quantum") {
-                "quantum"
-            } else if input_lower.contains("core") {
+            let template = if input_lower.contains("core") {
                 "core"
             } else if input_lower.contains("gateway") {
                 "gateway"
@@ -70,7 +68,7 @@ impl LlmIntentEngine {
                 }),
                 explanation: format!("Fallback: provision {} {} node(s)", count, template),
             })
-        } else if input_lower.contains("optimize") || input_lower.contains("route") || input_lower.contains("quantum") {
+        } else if input_lower.contains("optimize") || input_lower.contains("route") {
             let nodes = extract_number(&input_lower).unwrap_or(8);
             Ok(LlmParsedIntent {
                 action: "optimize_network".to_string(),

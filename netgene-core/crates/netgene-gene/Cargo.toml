@@ -20,6 +20,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
+ml-dsa = { version = "0.1.1", default-features = false, features = ["alloc", "zeroize"] }
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }

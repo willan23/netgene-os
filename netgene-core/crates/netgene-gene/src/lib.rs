@@ -17,6 +17,7 @@ pub mod identity;
 pub mod token;
 pub mod storage;
 pub mod secret;
+pub mod pq;
 pub mod error;
 
 pub use identity::{NetGene, GeneRole, GeneStatus};

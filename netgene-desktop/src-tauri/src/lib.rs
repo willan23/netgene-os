@@ -1,4 +1,5 @@
-use netgene_kernel::{NetSphereKernel, marketplace::{Marketplace, AgentManifest}};
+use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel, marketplace::{Marketplace, AgentManifest}};
+use netgene_policy::{AuditEntry, Policy};
 use netgene_store::{NetGeneStore, models::{StoredEvent, StoredNode}};
 use netgene_llm::OllamaClient;
 use netgene_vault::{NetGeneVault, VaultFile};
@@ -11,33 +12,73 @@ use std::time::Duration;
 use std::sync::Arc;
 use tokio::time::sleep;
 
+fn record_event(store: &NetGeneStore, app: &AppHandle, event_type: &str, details: String) {
+    let event = StoredEvent {
+        id: Uuid::new_v4(),
+        timestamp: Utc::now(),
+        source: "IntentTerminal".to_string(),
+        event_type: event_type.to_string(),
+        severity: "INFO".to_string(),
+        details,
+    };
+    match store.save_event(&event) {
+        Ok(()) => { let _ = app.emit("kernel-log", format!("Saved to Store: {}", event.details)); }
+        Err(e) => eprintln!("Failed to save event to store: {}", e),
+    }
+}
+
+/// Propose an intent; the kernel's policy engine decides (allow / confirm / deny).
 #[tauri::command]
 async fn dispatch_intent(
     intent: String,
     store: State<'_, NetGeneStore>,
     kernel: State<'_, Arc<NetSphereKernel>>,
     app: AppHandle
-) -> Result<String, String> {
-    let res = kernel.dispatch_intent(&intent).await.map_err(|e| e.to_string())?;
-    
-    // Registar evento automaticamente no store
-    let event = StoredEvent {
-        id: Uuid::new_v4(),
-        timestamp: Utc::now(),
-        source: "IntentTerminal".to_string(),
-        event_type: "IntentDispatched".to_string(),
-        severity: "INFO".to_string(),
-        details: format!("Intent: {} | Result: {}", intent, res),
-    };
-    
-    if let Err(e) = store.save_event(&event) {
-        eprintln!("Failed to save event to store: {}", e);
-    } else {
-        // Emitir logo via event emitter para atualizar a UI instantaneamente
-        let _ = app.emit("kernel-log", format!("Saved to Store: {}", event.details));
-    }
+) -> Result<DispatchOutcome, String> {
+    let outcome = kernel.propose_intent(&intent).await.map_err(|e| e.to_string())?;
+    record_event(&store, &app, "IntentProposed", format!("Intent: {} | {}", intent, outcome.summary()));
+    Ok(outcome)
+}
 
-    Ok(format!("Intent dispatched: {}", res))
+/// Operator approval of an action held for confirmation.
+#[tauri::command]
+async fn confirm_intent(
+    proposal_id: Uuid,
+    store: State<'_, NetGeneStore>,
+    kernel: State<'_, Arc<NetSphereKernel>>,
+    app: AppHandle
+) -> Result<DispatchOutcome, String> {
+    let outcome = kernel.confirm(proposal_id).await.map_err(|e| e.to_string())?;
+    record_event(&store, &app, "IntentConfirmed", outcome.summary());
+    Ok(outcome)
+}
+
+#[tauri::command]
+async fn reject_intent(proposal_id: Uuid, kernel: State<'_, Arc<NetSphereKernel>>) -> Result<(), String> {
+    kernel.reject(proposal_id).await.map_err(|e| e.to_string())
+}
+
+/// Latest audit log entries (hash-chained and signed).
+#[tauri::command]
+async fn get_audit_log(limit: usize, kernel: State<'_, Arc<NetSphereKernel>>) -> Result<Vec<AuditEntry>, String> {
+    let entries = kernel.audit_entries().await.map_err(|e| e.to_string())?;
+    Ok(entries.into_iter().rev().take(limit).collect())
+}
+
+/// The first Master Gene whose key is in the OS keystore, else a throw-away one.
+fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<KernelConfig> {
+    let policy = Policy::load_or_default(&netgene_dir.join("policy.json"))?;
+    let audit_path = Some(netgene_dir.join("audit.jsonl"));
+    let gene_dir = default_gene_dir();
+    let master = netgene_gene::storage::list_genes(&gene_dir)?
+        .into_iter()
+        .filter(|g| g.role == netgene_gene::GeneRole::Master)
+        .find_map(|g| load_gene(&g.id.to_string(), &gene_dir, &OsKeyring::new()).ok());
+
+    Ok(match master {
+        Some((operator, operator_kp)) => KernelConfig { operator, operator_kp, policy, audit_path },
+        None => KernelConfig { policy, audit_path, ..KernelConfig::ephemeral()? },
+    })
 }
 
 #[tauri::command]
@@ -181,6 +222,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             dispatch_intent,
+            confirm_intent,
+            reject_intent,
+            get_audit_log,
             get_network_health,
             get_network_topology,
             get_stored_events,
@@ -203,9 +247,11 @@ pub fn run() {
                 .expect("Failed to initialize NetGeneStore");
             app.manage(store);
 
-            // Inicializar Kernel 1 vez e guardar no estado global
+            // Boot the kernel once, acting as the local Master Gene when one exists.
+            let netgene_dir = app.path().home_dir()?.join(".netgene");
+            let config = kernel_config(&netgene_dir).expect("Failed to load kernel configuration");
             let kernel = tauri::async_runtime::block_on(async {
-                NetSphereKernel::boot().await.expect("Failed to boot NetSphereKernel")
+                NetSphereKernel::boot_with(config).await.expect("Failed to boot NetSphereKernel")
             });
             app.manage(Arc::new(kernel));
             

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { Network, Plus, RefreshCw, Cpu } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { dispatchWithConfirmation } from '../../intents';
 
 export function NetworkTopology() {
   const { topology, setTopology } = useStore();
@@ -25,7 +26,7 @@ export function NetworkTopology() {
   const handleSpawnNode = async () => {
     setLoading(true);
     try {
-      await invoke('dispatch_intent', { intent: 'provision 1 mesh node' });
+      await dispatchWithConfirmation('provision 1 mesh node');
       await fetchTopology();
     } catch (err) {
       console.error(err);

@@ -8,12 +8,13 @@ members = [
     "crates/netgene-wasm",
     "crates/netgene-vault",
     "crates/netgene-safeguard",
+    "crates/netgene-policy",
     "crates/netgene-cli",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["NetGene OS contributors"]
 license = "MIT OR Apache-2.0"
@@ -65,7 +66,7 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 sled = "0.34"
 
 # P2P networking (libp2p)
-libp2p = { version = "0.54", features = [
+libp2p = { version = "0.57", features = [
     "tokio",
     "tcp",
     "noise",
@@ -88,3 +89,4 @@ netgene-p2p       = { path = "crates/netgene-p2p" }
 netgene-wasm      = { path = "crates/netgene-wasm" }
 netgene-vault     = { path = "crates/netgene-vault" }
 netgene-safeguard = { path = "crates/netgene-safeguard" }
+netgene-policy    = { path = "crates/netgene-policy" }

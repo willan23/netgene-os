@@ -23,10 +23,10 @@ mod tests {
     #[tokio::test]
     async fn test_fallback_provision_nodes() {
         let e = engine();
-        let intent = e.parse("spawn 3 quantum nodes with HA").await.unwrap();
+        let intent = e.parse("spawn 3 gateway nodes with HA").await.unwrap();
         assert_eq!(intent.action, "provision_nodes");
         assert_eq!(intent.parameters["count"], 3);
-        assert_eq!(intent.parameters["template"], "quantum");
+        assert_eq!(intent.parameters["template"], "gateway");
     }
 
     #[tokio::test]

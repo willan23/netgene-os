@@ -1,4 +1,4 @@
-# Arquitetura do NetGene OS (v0.4.0)
+# Arquitetura do NetGene OS (v0.5.0)
 
 ## Camadas
 
@@ -32,18 +32,23 @@
 ## Fluxo de uma intenção
 
 1. O usuário escreve uma intenção na CLI (`netgene agent dispatch "..."`) ou no terminal do desktop.
-2. O `NetSphereKernel::dispatch_intent` pede ao `LlmIntentEngine` uma ação estruturada. Se o Ollama não responder, ou responder algo fora do formato, entra o parser por regras.
-3. A ação vira uma `AgentMessage` no `MessageBus`, e os agentes a consomem.
-4. O desktop grava um `StoredEvent` no `netgene-store` e emite `kernel-log` para a interface.
-
-**Limite atual:** ainda não existe um motor de políticas entre os passos 2 e 3. Ele é o item central da Fase 2 do [roadmap](../../ROADMAP.md).
+2. O `NetSphereKernel::propose_intent` pede ao `LlmIntentEngine` uma ação estruturada. Se o Ollama não responder, ou responder algo fora do formato, entra o parser por regras. O resultado é só uma **proposta**.
+3. A proposta é mapeada para uma `Action` do catálogo (`netgene-policy`). Se não estiver no catálogo, ela é negada.
+4. O `PolicyEngine` avalia a ação para a Gene operadora (status, capacidade, limites de parâmetros, regras):
+   - `allow`: executa.
+   - `confirm`: fica pendente até `confirm(proposal_id)`, ou é descartada com `reject`.
+   - `deny`: é recusada.
+5. Cada passo (proposta, decisão, confirmação, execução) entra no `AuditLog`, encadeado por SHA3 e assinado pela Gene operadora.
+6. Só então a ação vira uma `AgentMessage` no `MessageBus`.
 
 ## Dados locais
 
 | Caminho | Conteúdo |
 |---|---|
 | `~/.netgene/genes/` | `<id>.gene.json` (identidade pública) |
-| Cofre do SO, serviço `netgene-os` | `gene:<id>` (chave PKCS#8 da Gene) e `vault:<fp>` (chave AES do vault) |
+| Cofre do SO, serviço `netgene-os` | `gene:<id>` (PKCS#8 Ed25519), `gene-pq:<id>` (semente ML-DSA-65) e `vault:<fp>` (chave AES do vault) |
+| `~/.netgene/policy.json` | Política (opcional; sem ela vale a padrão: leituras permitidas, escritas com confirmação) |
+| `~/.netgene/audit.jsonl` | Log de auditoria encadeado e assinado |
 | `~/.netgene/db/` | Banco sled (nós, eventos, memória de agentes) |
 | `~/.netgene/vault/` | Chunks cifrados (formato v1) e `.meta` |
 | `~/.netgene/marketplace/` | Manifestos de agentes assinados |

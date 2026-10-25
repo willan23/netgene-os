@@ -27,11 +27,19 @@ pub fn gene_secret_name(gene_id: &str) -> String {
     format!("gene:{}", gene_id)
 }
 
-/// Save a NetGene (public JSON on disk) and its private key (secret store).
+/// Name of the secret that holds a gene's ML-DSA-65 seed.
+pub fn gene_pq_secret_name(gene_id: &str) -> String {
+    format!("gene-pq:{}", gene_id)
+}
+
+/// Save a NetGene (public JSON on disk) and its private keys (secret store).
 pub fn save_gene(gene: &NetGene, kp: &GeneKeyPair, dir: &Path, secrets: &dyn SecretStore) -> Result<()> {
     std::fs::create_dir_all(dir)?;
 
     secrets.set(&gene_secret_name(&gene.id.to_string()), kp.pkcs8_bytes())?;
+    if let Some(pq) = kp.pq() {
+        secrets.set(&gene_pq_secret_name(&gene.id.to_string()), pq.seed_bytes())?;
+    }
 
     let gene_path = dir.join(format!("{}.gene.json", gene.id));
     let json = serde_json::to_string_pretty(gene)?;
@@ -53,10 +61,20 @@ pub fn load_gene(gene_id: &str, dir: &Path, secrets: &dyn SecretStore) -> Result
         None => migrate_legacy_key(gene_id, dir, secrets)?
             .with_context(|| format!("Private key for gene '{}' not found in the secret store", gene_id))?,
     };
-    let kp = GeneKeyPair::from_pkcs8(pkcs8)?;
+    let mut kp = GeneKeyPair::from_pkcs8(pkcs8)?;
 
     if kp.public_key_b64() != gene.public_key_b64 {
         anyhow::bail!("Private key for gene '{}' does not match its public key", gene_id);
+    }
+
+    if gene.pq_public_key_b64.is_some() {
+        let seed = secrets
+            .get(&gene_pq_secret_name(gene_id))?
+            .with_context(|| format!("ML-DSA key for gene '{}' not found in the secret store", gene_id))?;
+        kp = kp.with_pq_seed(&seed)?;
+        if kp.pq_public_key_b64() != gene.pq_public_key_b64 {
+            anyhow::bail!("ML-DSA key for gene '{}' does not match its public key", gene_id);
+        }
     }
 
     Ok((gene, kp))
@@ -119,13 +137,29 @@ mod tests {
         let (loaded, loaded_kp) = load_gene(&gene.id.to_string(), dir.path(), &secrets).unwrap();
         assert_eq!(loaded.id, gene.id);
         assert_eq!(loaded_kp.public_key_bytes(), kp.public_key_bytes());
+        assert_eq!(loaded_kp.pq_public_key_b64(), kp.pq_public_key_b64(), "PQ key must survive the round trip");
+        let json = std::fs::read_to_string(dir.path().join(format!("{}.gene.json", gene.id))).unwrap();
+        assert!(!json.contains(&base64::engine::general_purpose::STANDARD.encode(kp.pq().unwrap().seed_bytes())));
+    }
+
+    #[test]
+    fn test_missing_pq_seed_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = MemorySecretStore::new();
+        let (gene, kp) = NetGene::generate_master("PQ").unwrap();
+        save_gene(&gene, &kp, dir.path(), &secrets).unwrap();
+        secrets.delete(&gene_pq_secret_name(&gene.id.to_string())).unwrap();
+
+        assert!(load_gene(&gene.id.to_string(), dir.path(), &secrets).is_err());
     }
 
     #[test]
     fn test_legacy_key_file_is_migrated() {
         let dir = tempfile::tempdir().unwrap();
         let secrets = MemorySecretStore::new();
-        let (gene, kp) = NetGene::generate_master("Legacy").unwrap();
+        let (mut gene, kp) = NetGene::generate_master("Legacy").unwrap();
+        // Genes written before v0.5 have no post-quantum key.
+        gene.pq_public_key_b64 = None;
 
         std::fs::write(dir.path().join(format!("{}.gene.json", gene.id)), serde_json::to_string(&gene).unwrap()).unwrap();
         let key_path = dir.path().join(format!("{}.key", gene.id));

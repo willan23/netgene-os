@@ -1,0 +1,22 @@
+[package]
+name = "netgene-policy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene Policy — action catalog, policy engine and signed audit log for agent actions"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+sha3 = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
+tracing = { workspace = true }
+netgene-gene = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

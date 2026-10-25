@@ -25,7 +25,7 @@ pub mod kernel;
 pub mod error;
 pub mod marketplace;
 
-pub use kernel::NetSphereKernel;
+pub use kernel::{DispatchOutcome, KernelConfig, NetSphereKernel};
 pub use agent::{Agent, AgentId, AgentStatus, AgentMessage};
 pub use bus::MessageBus;
 pub use intent::{Intent, IntentParser, IntentAction};
@@ -49,28 +49,59 @@ mod tests {
         assert!(names.contains(&"EvolutionAgent"));
     }
 
-    /// Dispatch a valid spawn_node intent — should succeed.
+    /// A state-changing intent waits for confirmation, then executes.
     #[tokio::test]
-    async fn test_kernel_dispatch_spawn_intent() {
+    async fn test_kernel_spawn_requires_confirmation() {
         let kernel = NetSphereKernel::boot().await.unwrap();
-        let result = kernel.dispatch_intent("spawn 2 nodes").await.unwrap();
-        assert!(result.contains("Action dispatched"), "unexpected result: {result}");
+        let outcome = kernel.propose_intent("spawn 2 nodes").await.unwrap();
+        let DispatchOutcome::PendingConfirmation { proposal_id, action, .. } = outcome else {
+            panic!("expected confirmation, got {outcome:?}");
+        };
+        assert_eq!(action.kind, "node.provision");
+
+        let confirmed = kernel.confirm(proposal_id).await.unwrap();
+        assert!(matches!(confirmed, DispatchOutcome::Executed { .. }));
+        assert!(kernel.confirm(proposal_id).await.is_err(), "a proposal can only be confirmed once");
     }
 
-    /// Dispatch an optimization intent — should succeed.
+    /// Optimisation also changes state, so it is held for confirmation.
     #[tokio::test]
-    async fn test_kernel_dispatch_optimize_intent() {
+    async fn test_kernel_optimize_is_pending() {
         let kernel = NetSphereKernel::boot().await.unwrap();
         let result = kernel.dispatch_intent("optimize routes").await.unwrap();
-        assert!(result.contains("dispatched") || result.contains("acknowledged"));
+        assert!(result.contains("Confirmation required"), "unexpected result: {result}");
     }
 
-    /// Dispatch an unknown intent — the rule-based fallback answers with a status query.
+    /// Read-only intents run immediately (unknown text falls back to a status query).
     #[tokio::test]
-    async fn test_kernel_dispatch_unknown_intent() {
+    async fn test_kernel_read_intent_executes() {
         let kernel = NetSphereKernel::boot().await.unwrap();
-        let result = kernel.dispatch_intent("xyzzy plugh").await.unwrap();
-        assert!(result.contains("Action dispatched"), "unexpected result: {result}");
+        let outcome = kernel.propose_intent("xyzzy plugh").await.unwrap();
+        assert!(matches!(outcome, DispatchOutcome::Executed { ref action, .. } if action.kind == "system.status"));
+    }
+
+    /// Requests beyond policy limits are denied, and everything is audited.
+    #[tokio::test]
+    async fn test_kernel_denies_and_audits() {
+        let kernel = NetSphereKernel::boot().await.unwrap();
+        let outcome = kernel.propose_intent("spawn 5000 nodes").await.unwrap();
+        assert!(matches!(outcome, DispatchOutcome::Denied { .. }), "unexpected {outcome:?}");
+
+        let entries = kernel.audit_entries().await.unwrap();
+        assert_eq!(entries.last().unwrap().record.decision, "deny");
+        netgene_policy::audit::verify_chain(&entries).unwrap();
+    }
+
+    /// Rejected proposals are audited and cannot be confirmed later.
+    #[tokio::test]
+    async fn test_kernel_reject_proposal() {
+        let kernel = NetSphereKernel::boot().await.unwrap();
+        let DispatchOutcome::PendingConfirmation { proposal_id, .. } = kernel.propose_intent("spawn 1 node").await.unwrap() else {
+            panic!("expected confirmation");
+        };
+        kernel.reject(proposal_id).await.unwrap();
+        assert!(kernel.confirm(proposal_id).await.is_err());
+        assert_eq!(kernel.audit_entries().await.unwrap().last().unwrap().record.decision, "rejected");
     }
 
     /// Kernel memory stores and retrieves events.
