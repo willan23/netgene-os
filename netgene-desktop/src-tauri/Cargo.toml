@@ -32,3 +32,4 @@ netgene-kernel = { path = "../../netgene-core/crates/netgene-kernel" }
 netgene-store = { path = "../../netgene-core/crates/netgene-store" }
 netgene-vault = { path = "../../netgene-core/crates/netgene-vault" }
 netgene-llm = { path = "../../netgene-core/crates/netgene-llm" }
+netgene-gene = { path = "../../netgene-core/crates/netgene-gene" }

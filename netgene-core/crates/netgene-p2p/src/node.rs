@@ -7,6 +7,7 @@ use libp2p::{
     swarm::{Swarm, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Transport,
 };
+use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use libp2p::futures::StreamExt;
@@ -17,19 +18,46 @@ use crate::events::MeshMessage;
 
 pub const GOSSIPSUB_TOPIC: &str = "netgene-mesh-v1";
 
+/// Which peers this node talks to.
+#[derive(Debug, Clone)]
+pub enum PeerPolicy {
+    /// Only these peers may connect or relay messages.
+    Allowlist(HashSet<PeerId>),
+    /// Any peer (development only).
+    Open,
+}
+
+impl PeerPolicy {
+    pub fn allows(&self, peer: &PeerId) -> bool {
+        match self {
+            PeerPolicy::Allowlist(peers) => peers.contains(peer),
+            PeerPolicy::Open => true,
+        }
+    }
+}
+
 pub struct NetGeneP2PNode {
     pub peer_id: PeerId,
     swarm: Swarm<NetGeneBehaviour>,
+    policy: PeerPolicy,
     msg_tx: mpsc::Sender<MeshMessage>,
     msg_rx: mpsc::Receiver<MeshMessage>,
 }
 
 impl NetGeneP2PNode {
-    pub fn new(listen_port: u16) -> Result<(Self, mpsc::Sender<MeshMessage>, mpsc::Receiver<MeshMessage>)> {
-        // Generate identity keypair for libp2p peer ID
-        let local_key = identity::Keypair::generate_ed25519();
+    /// Create a node with the given libp2p identity (normally derived from a
+    /// Gene, see [`crate::identity::libp2p_keypair_from_gene`]).
+    pub fn new(
+        listen_port: u16,
+        local_key: identity::Keypair,
+        policy: PeerPolicy,
+    ) -> Result<(Self, mpsc::Sender<MeshMessage>, mpsc::Receiver<MeshMessage>)> {
         let peer_id = PeerId::from(local_key.public());
         info!("🌐 Initializing P2P node with PeerId: {}", peer_id);
+        match &policy {
+            PeerPolicy::Allowlist(peers) => info!("🔒 Peer allowlist active ({} peers)", peers.len()),
+            PeerPolicy::Open => warn!("⚠️ Open peer policy: any peer on the network can join"),
+        }
 
         // Transport setup: TCP + Noise + Yamux
         let transport = tcp::tokio::Transport::default()
@@ -38,10 +66,11 @@ impl NetGeneP2PNode {
             .multiplex(yamux::Config::default())
             .boxed();
 
-        // Gossipsub setup
+        // Gossipsub: signed messages, strict validation, application-level acceptance.
         let gossipsub_config = gossipsub::ConfigBuilder::default()
             .heartbeat_interval(Duration::from_secs(1))
-            .validation_mode(gossipsub::ValidationMode::Permissive)
+            .validation_mode(gossipsub::ValidationMode::Strict)
+            .validate_messages()
             .build()
             .map_err(|e| anyhow::anyhow!("Gossipsub config error: {}", e))?;
 
@@ -62,7 +91,7 @@ impl NetGeneP2PNode {
 
         // Identify setup
         let identify = identify::Behaviour::new(identify::Config::new(
-            "/netgene/0.2.0".to_string(),
+            format!("/netgene/{}", env!("CARGO_PKG_VERSION")),
             local_key.public(),
         ));
 
@@ -90,6 +119,7 @@ impl NetGeneP2PNode {
         let node = Self {
             peer_id,
             swarm,
+            policy,
             msg_tx: in_tx,
             msg_rx: out_rx,
         };
@@ -124,16 +154,36 @@ impl NetGeneP2PNode {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         info!("📡 Listening on P2P multiaddr: {}", address);
                     }
+                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        if !self.policy.allows(&peer_id) {
+                            warn!("🚫 Rejecting connection from peer {} (not in allowlist)", peer_id);
+                            let _ = self.swarm.disconnect_peer_id(peer_id);
+                        }
+                    }
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer, addr) in list {
+                            if !self.policy.allows(&peer) {
+                                continue;
+                            }
                             info!("🔎 mDNS discovered peer {} at {}", peer, addr);
                             self.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer);
                             self.swarm.behaviour_mut().kademlia.add_address(&peer, addr);
                         }
                     }
-                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::Gossipsub(gossipsub::Event::Message { message, .. })) => {
-                        if let Ok(msg) = serde_json::from_slice::<MeshMessage>(&message.data) {
-                            let _ = self.msg_tx.send(msg).await;
+                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::Gossipsub(gossipsub::Event::Message {
+                        propagation_source, message_id, message,
+                    })) => {
+                        let author_allowed = message.source.as_ref().is_some_and(|s| self.policy.allows(s));
+                        let parsed = serde_json::from_slice::<MeshMessage>(&message.data);
+                        let accept = self.policy.allows(&propagation_source) && author_allowed && parsed.is_ok();
+
+                        let verdict = if accept { gossipsub::MessageAcceptance::Accept } else { gossipsub::MessageAcceptance::Reject };
+                        let _ = self.swarm.behaviour_mut().gossipsub
+                            .report_message_validation_result(&message_id, &propagation_source, verdict);
+
+                        match parsed {
+                            Ok(msg) if accept => { let _ = self.msg_tx.send(msg).await; }
+                            _ => warn!("🚫 Rejected mesh message from {}", propagation_source),
                         }
                     }
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
@@ -143,5 +193,20 @@ impl NetGeneP2PNode {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_peer_policy() {
+        let allowed = PeerId::random();
+        let stranger = PeerId::random();
+        let policy = PeerPolicy::Allowlist(HashSet::from([allowed]));
+        assert!(policy.allows(&allowed));
+        assert!(!policy.allows(&stranger));
+        assert!(PeerPolicy::Open.allows(&stranger));
     }
 }

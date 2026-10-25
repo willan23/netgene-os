@@ -10,7 +10,9 @@ use chrono::{DateTime, Utc};
 use anyhow::Result;
 use tracing::{info, debug};
 
-use crate::crypto::{fingerprint, short_fingerprint, GeneKeyPair};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+
+use crate::crypto::{fingerprint, short_fingerprint, verify_signature, GeneKeyPair};
 use crate::error::GeneError;
 
 /// Role of a NetGene in the hierarchy.
@@ -111,6 +113,9 @@ pub struct NetGene {
     pub description: Option<String>,
     /// Capabilities granted to this gene.
     pub capabilities: Vec<String>,
+    /// Parent's Ed25519 signature over this gene's public key (None for a Master Gene).
+    #[serde(default)]
+    pub lineage_signature_b64: Option<String>,
 }
 
 impl NetGene {
@@ -140,8 +145,8 @@ impl NetGene {
                 "node.spawn".to_string(),
                 "agent.spawn".to_string(),
                 "network.admin".to_string(),
-                "quantum.run".to_string(),
             ],
+            lineage_signature_b64: None,
         };
 
         info!(
@@ -173,7 +178,7 @@ impl NetGene {
         let sfp = short_fingerprint(kp.public_key_bytes());
 
         // Sign the new gene's public key with parent key to establish lineage
-        let _lineage_sig = parent_kp.sign(kp.public_key_bytes())?;
+        let lineage_sig = parent_kp.sign(kp.public_key_bytes())?;
 
         let gene = NetGene {
             id: Uuid::new_v4(),
@@ -188,6 +193,7 @@ impl NetGene {
             created_at: Utc::now(),
             description: None,
             capabilities,
+            lineage_signature_b64: Some(BASE64.encode(lineage_sig)),
         };
 
         debug!(
@@ -212,6 +218,27 @@ impl NetGene {
     pub fn revoke(&mut self) {
         self.status = GeneStatus::Revoked;
         info!(gene_id = %self.id, "Gene REVOKED");
+    }
+
+    /// Decode this gene's public key.
+    pub fn public_key_bytes(&self) -> Result<Vec<u8>> {
+        Ok(BASE64.decode(&self.public_key_b64)?)
+    }
+
+    /// True if `parent` signed this gene's public key (verifiable lineage).
+    pub fn verify_lineage(&self, parent: &NetGene) -> bool {
+        if self.parent_id != Some(parent.id) {
+            return false;
+        }
+        let (Some(sig_b64), Ok(own_pk), Ok(parent_pk)) =
+            (&self.lineage_signature_b64, self.public_key_bytes(), parent.public_key_bytes())
+        else {
+            return false;
+        };
+        match BASE64.decode(sig_b64) {
+            Ok(sig) => verify_signature(&parent_pk, &own_pk, &sig),
+            Err(_) => false,
+        }
     }
 
     /// Check if this gene has a specific capability.
@@ -259,6 +286,19 @@ mod tests {
         .unwrap();
         assert_eq!(sub.parent_id, Some(master.id));
         assert_eq!(sub.role, GeneRole::Node);
+        assert!(sub.verify_lineage(&master));
+    }
+
+    #[test]
+    fn test_lineage_rejects_wrong_parent() {
+        let (master, master_kp) = NetGene::generate_master("Master").unwrap();
+        let (impostor, _) = NetGene::generate_master("Impostor").unwrap();
+        let (sub, _) = NetGene::spawn_sub_gene(&master, &master_kp, "Node", GeneRole::Node, vec![]).unwrap();
+
+        let mut forged = sub.clone();
+        forged.parent_id = Some(impostor.id);
+        assert!(!forged.verify_lineage(&impostor));
+        assert!(!master.verify_lineage(&master));
     }
 
     #[test]

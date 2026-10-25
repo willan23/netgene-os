@@ -1,4 +1,4 @@
-# Arquitetura do NetGene OS (v0.3.0)
+# Arquitetura do NetGene OS (v0.4.0)
 
 ## Camadas
 
@@ -17,14 +17,14 @@
         │                  │                  │
 ┌───────▼──────┐   ┌───────▼──────┐   ┌───────▼──────────┐
 │ netgene-llm  │   │ netgene-store│   │ netgene-wasm     │
-│ Ollama HTTP  │   │ sled + LWW   │   │ wasmtime (valida │
-│ + fallback   │   │ CRDT         │   │ e compila)       │
+│ Ollama HTTP  │   │ sled + LWW   │   │ wasmtime 36: só  │
+│ + fallback   │   │ CRDT         │   │ módulos assinados│
 └──────────────┘   └───────┬──────┘   └──────────────────┘
                            │
 ┌──────────────────────────▼────────────────────────────────┐
-│  netgene-gene: identidade Ed25519, hierarquia de genes     │
-│  netgene-p2p: libp2p (Noise/Yamux/Gossipsub/mDNS/Kad)      │
-│  netgene-vault: chunks AES-256-GCM                         │
+│  netgene-gene: Ed25519, linhagem assinada, SecretStore     │
+│  netgene-p2p: libp2p, PeerId = Gene, allowlist de linhagem │
+│  netgene-vault: chunks AES-256-GCM + AAD, chave no cofre   │
 │  netgene-safeguard: anomalias por z-score                  │
 └───────────────────────────────────────────────────────────┘
 ```
@@ -42,7 +42,14 @@
 
 | Caminho | Conteúdo |
 |---|---|
-| `~/.netgene/genes/` | `<id>.gene.json` (público) e `<id>.key` (chave privada, **sem cifra**) |
+| `~/.netgene/genes/` | `<id>.gene.json` (identidade pública) |
+| Cofre do SO, serviço `netgene-os` | `gene:<id>` (chave PKCS#8 da Gene) e `vault:<fp>` (chave AES do vault) |
 | `~/.netgene/db/` | Banco sled (nós, eventos, memória de agentes) |
-| `~/.netgene/vault/` | Chunks cifrados e `.meta` (veja as limitações no README) |
-| `./.netgene/marketplace/` | Manifestos de agentes locais (diretório de trabalho atual) |
+| `~/.netgene/vault/` | Chunks cifrados (formato v1) e `.meta` |
+| `~/.netgene/marketplace/` | Manifestos de agentes assinados |
+
+## Modelo de confiança
+
+- **Gene Master:** a raiz. As sub-genes guardam `lineage_signature_b64`, a assinatura da Master sobre a chave pública delas.
+- **Malha P2P:** cada nó roda como uma Gene, e o PeerId libp2p é derivado da mesma chave. A allowlist é a Master mais as genes cuja linhagem é válida. Identidades de outros dispositivos entram com `gene import` (só a parte pública).
+- **WASM e marketplace:** o autor assina, e o sandbox e o marketplace verificam a assinatura sobre os bytes exatos.

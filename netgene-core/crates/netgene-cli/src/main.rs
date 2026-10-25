@@ -84,6 +84,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::new(filter))
         .with_target(false)
+        .with_writer(std::io::stderr)
         .compact()
         .init();
 
@@ -98,4 +99,16 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Cli;
+    use clap::CommandFactory;
+
+    /// Catches clap definition conflicts (duplicate flags, bad defaults) in every subcommand.
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
 }

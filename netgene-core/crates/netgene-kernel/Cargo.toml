@@ -17,5 +17,9 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 netgene-gene = { workspace = true }
+base64 = { workspace = true }
 netgene-store = { workspace = true }
 netgene-llm = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

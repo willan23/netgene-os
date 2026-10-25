@@ -4,6 +4,7 @@ use clap::Subcommand;
 use anyhow::Result;
 use netgene_gene::{
     identity::NetGene,
+    secret::OsKeyring,
     storage::{default_gene_dir, save_gene, list_genes},
 };
 
@@ -34,16 +35,29 @@ pub enum GeneCommand {
         /// Gene ID to verify
         id: String,
     },
+    /// Print a gene's public identity (JSON) to share with other nodes
+    Export {
+        /// Gene ID
+        id: String,
+    },
+    /// Import another node's public identity (JSON produced by `gene export`)
+    Import {
+        /// Path to the exported JSON
+        file: std::path::PathBuf,
+    },
 }
 
 pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
     let dir = default_gene_dir();
+    let secrets = OsKeyring::new();
 
     match cmd {
         GeneCommand::Init { name } => {
-            println!("🧬 Generating Master Gene for '{}'...", name);
+            if !json {
+                println!("🧬 Generating Master Gene for '{}'...", name);
+            }
             let (gene, kp) = NetGene::generate_master(&name)?;
-            save_gene(&gene, &kp, &dir)?;
+            save_gene(&gene, &kp, &dir, &secrets)?;
 
             if json {
                 println!("{}", serde_json::to_string_pretty(&gene)?);
@@ -58,13 +72,14 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
                 println!("║  Status:      {}", gene.status);
                 println!("║  Fingerprint: {}", gene.fingerprint);
                 println!("║  Short FP:    {}", gene.short_fp);
-                println!("║  Algorithm:   Ed25519 (Post-Quantum upgrade ready)");
+                println!("║  Algorithm:   Ed25519");
                 println!("║  Capabilities:");
                 for cap in &gene.capabilities {
                     println!("║    • {}", cap);
                 }
                 println!("╠══════════════════════════════════════════════════════╣");
-                println!("║  ✅ Gene saved to: {}", dir.display());
+                println!("║  ✅ Public identity: {}", dir.display());
+                println!("║  🔐 Private key:     OS keystore (service 'netgene-os')");
                 println!("╚══════════════════════════════════════════════════════╝");
             }
         }
@@ -109,7 +124,7 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
                 _ => GeneRole::Node,
             };
 
-            let (parent_gene, parent_kp) = load_gene(&parent, &dir)?;
+            let (parent_gene, parent_kp) = load_gene(&parent, &dir, &secrets)?;
             let caps = match gene_role {
                 GeneRole::Node => vec!["node.spawn".to_string(), "network.read".to_string()],
                 GeneRole::Agent => vec!["agent.run".to_string(), "network.read".to_string()],
@@ -118,7 +133,7 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
             };
 
             let (sub, kp) = NetGene::spawn_sub_gene(&parent_gene, &parent_kp, &name, gene_role, caps)?;
-            save_gene(&sub, &kp, &dir)?;
+            save_gene(&sub, &kp, &dir, &secrets)?;
 
             println!("✅ Sub-Gene spawned:");
             println!("   ID:   {}", sub.id);
@@ -129,13 +144,48 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
 
         GeneCommand::Verify { id } => {
             use netgene_gene::storage::load_gene;
-            match load_gene(&id, &dir) {
-                Ok((gene, _)) => {
-                    println!("✅ Gene verified:");
+            match load_gene(&id, &dir, &secrets) {
+                Ok((gene, kp)) => {
+                    let probe = b"netgene-verify";
+                    let sig = kp.sign(probe)?;
+                    if !netgene_gene::crypto::verify_signature(&gene.public_key_bytes()?, probe, &sig) {
+                        anyhow::bail!("Private key does not sign for gene {}", gene.id);
+                    }
+                    println!("✅ Gene verified (private key matches public key):");
                     println!("   {}", gene.display_line());
+
+                    if let Some(parent_id) = gene.parent_id {
+                        let parent = list_genes(&dir)?.into_iter().find(|g| g.id == parent_id);
+                        match parent {
+                            Some(p) if gene.verify_lineage(&p) => println!("   ✅ Lineage signed by parent {}", p.short_fp),
+                            Some(_) => println!("   ❌ Lineage signature INVALID"),
+                            None => println!("   ⚠️  Parent {} not found locally; lineage not checked", parent_id),
+                        }
+                    }
                 }
                 Err(e) => println!("❌ Verification failed: {}", e),
             }
+        }
+
+        GeneCommand::Export { id } => {
+            let gene = list_genes(&dir)?
+                .into_iter()
+                .find(|g| g.id.to_string() == id)
+                .ok_or_else(|| anyhow::anyhow!("Gene {} not found", id))?;
+            println!("{}", serde_json::to_string_pretty(&gene)?);
+        }
+
+        GeneCommand::Import { file } => {
+            let gene: NetGene = serde_json::from_str(&std::fs::read_to_string(&file)?)?;
+            gene.public_key_bytes()?;
+            std::fs::create_dir_all(&dir)?;
+            let path = dir.join(format!("{}.gene.json", gene.id));
+            if path.exists() {
+                anyhow::bail!("Gene {} already exists locally", gene.id);
+            }
+            std::fs::write(&path, serde_json::to_string_pretty(&gene)?)?;
+            println!("✅ Imported public identity {} ({})", gene.name, gene.short_fp);
+            println!("   It joins your mesh allowlist if its lineage is signed by your Master Gene.");
         }
     }
 

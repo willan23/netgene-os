@@ -28,6 +28,18 @@ jobs:
       - run: cargo check --workspace --all-targets
       - run: cargo test --workspace --no-fail-fast
 
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
+        working-directory: netgene-core
+      - run: cargo audit
+        working-directory: netgene-desktop/src-tauri
+
   desktop:
     name: Desktop (windows)
     runs-on: windows-latest

@@ -2,6 +2,7 @@ use netgene_kernel::{NetSphereKernel, marketplace::{Marketplace, AgentManifest}}
 use netgene_store::{NetGeneStore, models::{StoredEvent, StoredNode}};
 use netgene_llm::OllamaClient;
 use netgene_vault::{NetGeneVault, VaultFile};
+use netgene_gene::{NetGene, OsKeyring, storage::{default_gene_dir, load_gene}};
 use chrono::Utc;
 use uuid::Uuid;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -110,9 +111,28 @@ async fn install_agent(marketplace: State<'_, Marketplace>, kernel: State<'_, Ar
     Ok(manifest)
 }
 
+/// Public identities in the local gene store (no key material).
 #[tauri::command]
-fn publish_agent(marketplace: State<'_, Marketplace>, json_content: String) -> Result<AgentManifest, String> {
-    marketplace.publish_agent(&json_content).map_err(|e| e.to_string())
+fn list_genes() -> Result<Vec<NetGene>, String> {
+    netgene_gene::storage::list_genes(&default_gene_dir()).map_err(|e| e.to_string())
+}
+
+/// Sign a manifest with a local gene (key read from the OS keystore) and publish it.
+#[tauri::command]
+fn publish_agent(
+    marketplace: State<'_, Marketplace>,
+    gene_id: String,
+    id: String,
+    name: String,
+    version: String,
+    description: String,
+    capabilities: Vec<String>,
+) -> Result<AgentManifest, String> {
+    let (publisher, kp) = load_gene(&gene_id, &default_gene_dir(), &OsKeyring::new()).map_err(|e| e.to_string())?;
+    let manifest = AgentManifest::new_signed(&id, &name, &version, &description, capabilities, &publisher, &kp)
+        .map_err(|e| e.to_string())?;
+    marketplace.publish_manifest(&manifest).map_err(|e| e.to_string())?;
+    Ok(manifest)
 }
 
 #[tauri::command]
@@ -169,6 +189,7 @@ pub fn run() {
             list_marketplace_agents,
             install_agent,
             publish_agent,
+            list_genes,
             vault_store_file,
             vault_list_files,
             vault_retrieve_file,
@@ -191,7 +212,7 @@ pub fn run() {
             start_telemetry(app.handle().clone());
 
             let vault_path = app.path().home_dir()?.join(".netgene").join("vault");
-            let vault = NetGeneVault::new(vault_path).expect("Failed to initialize Vault");
+            let vault = NetGeneVault::open(vault_path, &OsKeyring::new()).expect("Failed to initialize Vault");
             app.manage(Arc::new(Mutex::new(vault)));
             
             Ok(())
