@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "netgene-desktop",
-  "version": "0.1.0",
-  "identifier": "com.user.netgene-desktop",
+  "productName": "NetGene OS",
+  "version": "0.3.0",
+  "identifier": "com.mnemosyne-one.netgene",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,13 +12,15 @@
   "app": {
     "windows": [
       {
-        "title": "netgene-desktop",
-        "width": 800,
-        "height": 600
+        "title": "NetGene OS",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 640
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {

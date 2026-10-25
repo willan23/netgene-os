@@ -21,28 +21,13 @@ tracing-subscriber = { workspace = true }
 chrono = { workspace = true }
 netgene-gene = { workspace = true }
 netgene-kernel = { workspace = true }
-netgene-quantum = { workspace = true }
-netgene-safeguard = { workspace = true }
-netgene-builder = { workspace = true }
-netgene-tui = { workspace = true }
 netgene-store = { workspace = true }
 netgene-llm = { workspace = true }
 netgene-p2p = { workspace = true }
-netgene-neural = { workspace = true }
 netgene-wasm = { workspace = true }
-netgene-ebpf = { workspace = true }
-netgene-k8s = { workspace = true }
-netgene-qpu = { workspace = true }
-netgene-mobile = { workspace = true }
-netgene-dao = { workspace = true }
-netgene-cloud = { path = "../netgene-cloud" }
-netgene-lite = { path = "../netgene-lite" }
-netgene-tpm = { path = "../netgene-tpm" }
-netgene-vault = { path = "../netgene-vault" }
+netgene-vault = { workspace = true }
 libp2p = { workspace = true }
 uuid = { workspace = true }
-nalgebra = { workspace = true }
-rand = { workspace = true }
 dirs = "5"
 
 [dev-dependencies]

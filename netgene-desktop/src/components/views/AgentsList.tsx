@@ -26,13 +26,12 @@ export function AgentsList() {
     switch(type) {
       case 'monitor': return 'Monitors network anomalies and logs traffic patterns.';
       case 'builder': return 'Provisions new nodes and manages topology expansion.';
-      case 'optimizer': return 'Analyzes QUBO models to improve routing efficiency.';
+      case 'optimizer': return 'Suggests routing and resource optimizations.';
       case 'network': return 'Ensures connectivity and peer-to-peer resilience.';
       case 'evolution': return 'Manages self-healing protocols and system updates.';
       case 'deepseek-coder-bdi': return 'Autonomous coding & vulnerability patch agent powered by DeepSeek.';
       case 'sentinel-guard-v2': return 'Zero-Trust network observer & Z-Score anomaly healer.';
       case 'swarm-coordinator': return 'Orchestrates distributed federated learning across nodes.';
-      case 'crypto-trader-bot': return 'Quantum SQA & QAOA arbitrage trader.';
       default: return 'Custom BDI autonomous agent installed from NetGene Marketplace.';
     }
   };

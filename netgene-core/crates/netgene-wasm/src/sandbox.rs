@@ -3,10 +3,10 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
-use anyhow::{Result, Context};
+use anyhow::Result;
 use tracing::{info, error};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use wasmtime::{Engine, Config, Module, Store};
+use wasmtime::{Engine, Config, Module};
 
 /// Signed WASM Gene Module for organic node replication
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,158 +1,113 @@
 # NetGene OS 🧬
-### *Living · Self-Evolving · Quantum-Enhanced Distributed Operating System*
 
-[![Website](https://img.shields.io/badge/Website-mnemosyne--one.com-cyan.svg?style=for-the-badge&logo=globe)](https://mnemosyne-one.com)
-[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange.svg?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-blue.svg?style=for-the-badge&logo=tauri)](https://tauri.app/)
-[![eBPF](https://img.shields.io/badge/Linux-eBPF_Zero_Copy-red.svg?style=for-the-badge&logo=linux)](https://ebpf.io/)
-[![Quantum](https://img.shields.io/badge/Quantum-QAOA%2FSQA-purple.svg?style=for-the-badge)](https://qiskit.org/)
-[![License](https://img.shields.io/badge/License-MIT%2FApache--2.0-green.svg?style=for-the-badge)](LICENSE)
+### A camada de confiança para agentes de IA: identidade criptográfica, permissões verificáveis e execução isolada, numa malha privada entre os seus dispositivos.
 
----
+[![Website](https://img.shields.io/badge/Website-mnemosyne--one.com-cyan.svg)](https://mnemosyne-one.com)
+[![License](https://img.shields.io/badge/License-MIT%20%2F%20Apache--2.0-green.svg)](#licença)
+[![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#estado-real-de-cada-módulo)
 
-## 🌐 Official Web Portal & Domain
-
-- **Official Web Portal**: [https://mnemosyne-one.com](https://mnemosyne-one.com)
-- **Live Platform**: [https://mnemosyne-one.web.app](https://mnemosyne-one.web.app)
+> **Pre-alpha.** O NetGene OS ainda não está pronto para dados ou infraestrutura reais. A tabela [Estado real](#estado-real-de-cada-módulo) diz exatamente o que funciona e o que não funciona.
 
 ---
 
-## 💳 Sistema de Pagamento / Billing System Note
+## Por que o NetGene existe
 
-> [!NOTE]
-> **Arquitetura de Pagamentos**: O sistema possui suporte integrado para gestão de subscrições e pagamentos (Stripe Billing Integration), mas **encontra-se atualmente em modo de demonstração / inativo** para acesso livre durante a fase de lançamento.
+Agentes de IA estão ganhando acesso a arquivos, redes, chaves e APIs. Hoje quase nenhum deles tem uma identidade própria, um limite claro do que pode fazer ou um registro auditável do que fez. Esse é o problema que o NetGene quer resolver:
 
----
+| Quem | O que ganha |
+|---|---|
+| **Usuário final** | Um assistente de IA local que roda nos seus dispositivos (PC, notebook e, no futuro, celular), sem nuvem de terceiros. Cada agente só faz o que você autorizou. |
+| **Desenvolvedores** | Um runtime para publicar agentes e plugins WASM assinados, com permissões declaradas, que qualquer pessoa pode instalar com segurança. |
+| **Empresas e big techs** | Uma camada auto-hospedada de identidade e política para frotas de agentes: cada ação é atribuída a uma identidade, limitada por capacidades e registrada, sem depender de um fornecedor. |
 
-## 📱 Aplicativo Mobile & Play Store Note
-
-> [!NOTE]
-> **Status da Aplicação Móvel**: A aplicação móvel Android está completamente projetada e configurada, mas **ainda não está disponível na Google Play Store** (atualmente em compilações de testes privados).
-
----
-
-## 🌟 Executive Overview / Visão Geral
-
-**NetGene OS** is a next-generation distributed operating system architecture engineered completely in **Rust**. Operating at the **1.0.0 Apex Megastructure** tier, NetGene OS bridges low-level Linux eBPF networking, post-quantum cryptographic vaults, local LLM multi-agent decision loops, and simulated quantum optimization (QAOA/SQA) into a cohesive, self-healing system.
-
-> **Português**: NetGene OS é um sistema operacional distribuído auto-evolutivo e otimizado por algoritmos pós-quânticos. Desenvolvido em 21 Crates em Rust, integra eBPF, agentes autônomos locais, armazenamento distribuído CRDT e interface gráfica moderna em Tauri + React.
+**O diferencial:** a proposta não é ser mais uma VPN mesh (NetBird, Tailscale e Nebula já fazem isso bem), nem mais um framework de agentes. O NetGene é a peça que falta entre os dois. É a camada que diz **quem** é cada agente, **o que** ele pode fazer e **onde** ele pode rodar.
 
 ---
 
-## 🏗️ System Architecture / Arquitetura do Sistema
+## Arquitetura
 
 ```mermaid
 graph TD
-    subgraph User & Presentation Layer
-        GUI["🖥️ NetGene Desktop (Tauri 2.0 + React)"]
-        CLI["💻 NetGene CLI & TUI Dashboard"]
-    end
-
-    subgraph Autonomous Control & Intelligence
-        Kernel["⚡ NetGene Kernel (Process & Event Loop)"]
-        Agent["🤖 Multi-Agent AI System"]
-        LLM["🧠 NetGene LLM (Ollama / llama.cpp)"]
-        Agent --> Kernel
-        LLM --> Agent
-    end
-
-    subgraph Quantum & Algorithmic Optimization
-        Quantum["⚛️ NetGene Quantum (QAOA / SQA Solvers)"]
-        QPU["🔬 NetGene QPU (OpenQASM 3.0 Emulator)"]
-        Quantum --> QPU
-        Kernel --> Quantum
-    end
-
-    subgraph Data & Post-Quantum Vault
-        Store["💾 NetGene Store (Sled + CRDT Sync)"]
-        Vault["🔐 NetGene Vault (Post-Quantum P2P Vault)"]
-        P2P["🌐 NetGene P2P (Libp2p Transport)"]
-        Store --> Vault
-        Vault --> P2P
-    end
-
-    subgraph Hardware & Security Interface
-        eBPF["🐧 Linux eBPF (Zero-Copy RingBuffer)"]
-        TPM["🛡️ Hardware TPM & Secure Enclave"]
-        Kernel --> eBPF
-        Vault --> TPM
-    end
-
-    GUI --> Kernel
-    CLI --> Kernel
+    UI["🖥️ Desktop (Tauri 2 + React)"] --> K
+    CLI["💻 CLI (netgene)"] --> K
+    K["⚡ Kernel: agentes + barramento de mensagens"] --> LLM["🧠 LLM local (Ollama)"]
+    K --> W["⚙️ Sandbox WASM"]
+    K --> S["💾 Store (sled + CRDT)"]
+    K --> G["🔑 Gene: identidade Ed25519"]
+    P["🌐 P2P (libp2p)"] --> G
+    V["📦 Vault (AES-256-GCM)"] --> G
+    SG["🛡️ Safeguard: detecção de anomalias"] --> S
 ```
 
----
-
-## 📦 21 Crates Architecture / Estrutura de Crates
-
-NetGene OS is strictly organized into **21 specialized Rust crates** for maximum parallelism, safety, and modularity:
-
-| Crate | Category | Responsibilities & Technology |
-| :--- | :--- | :--- |
-| `netgene-kernel` | **Core** | Microkernel process scheduler, memory pool & event loops |
-| `netgene-agent` | **AI** | Multi-agent autonomous lifecycle & infrastructure decision loop |
-| `netgene-llm` | **AI** | Local inference bridge for Ollama, llama.cpp & quantized models |
-| `netgene-quantum` | **Quantum** | QAOA (Quantum Approximate Optimization Algorithm) & SQA solvers |
-| `netgene-qpu` | **Quantum** | Hardware accelerator interface & OpenQASM 3.0 execution engine |
-| `netgene-ebpf` | **Network** | Linux kernel zero-copy packet filter & eBPF XDP hookloader |
-| `netgene-p2p` | **Network** | Distributed peer discovery, libp2p multiplexing & Kademlia DHT |
-| `netgene-store` | **Storage** | High-performance KV store (Sled) & CRDT state synchronization |
-| `netgene-vault` | **Security** | Post-quantum lattice encryption & secret zeroization |
-| `netgene-tpm` | **Security** | Hardware TPM 2.0 attestation & Secure Enclave key generation |
-| `netgene-safeguard`| **Resilience**| Autonomous system health check & self-healing circuit breakers |
-| `netgene-builder` | **Tooling** | Cross-compilation pipeline & release packaging engine |
-| `netgene-cli` | **Interface** | Command line control interface & interactive terminal shell |
-| `netgene-tui` | **Interface** | Terminal UI dashboard powered by `ratatui` |
-| `netgene-desktop` | **Interface** | Desktop GUI app built with Tauri 2.0, Vite, React & Tailwind |
+Mais detalhes em [netgene-core/docs/ARCHITECTURE.md](netgene-core/docs/ARCHITECTURE.md).
 
 ---
 
-## 🔥 Key Highlights & Features
+## Estado real de cada módulo
 
-- **🚀 100% Memory Safe Rust Architecture**: No garbage collection overhead, guaranteed thread safety and zero-cost abstractions.
-- **🤖 Autonomous Infrastructure Decisions**: Local LLM agents analyze network throughput and deploy dynamic firewall rules automatically.
-- **⚛️ Post-Quantum & Quantum-Ready**: Combines Kyber/Dilithium post-quantum cryptography with QAOA routing solvers.
-- **🐧 Linux eBPF Native Filtering**: Inspects and filters packets at the XDP network driver level before reaching kernel stack.
-- **🔄 Fault-Tolerant CRDT Replication**: State is distributed across nodes seamlessly without central points of failure.
+✅ funciona · 🧪 experimental (funciona em parte, com limitações conhecidas) · ⛔ não use para dados reais
+
+| Crate | Estado | O que faz de verdade | Limitação conhecida |
+|---|---|---|---|
+| `netgene-gene` | ✅ | Gera identidades Ed25519 (via `ring`), fingerprint SHA3-256, hierarquia Master → sub-genes, assinatura e verificação. | A chave privada é salva em base64 sem cifra. No Windows, sem permissões restritas. |
+| `netgene-p2p` | ✅ | Nó libp2p real: TCP + Noise + Yamux, Gossipsub assinado, mDNS, Kademlia, Identify. | Aceita qualquer peer da rede local. Ainda não liga o PeerId à identidade Gene. |
+| `netgene-store` | ✅ | Banco local (sled) para nós, eventos e memória de agentes, com registrador CRDT LWW. | `sled` está sem manutenção ativa. Migração prevista para `redb`. |
+| `netgene-llm` | ✅ | Cliente Ollama (chat/generate) e parser de intenções com fallback por regras. | Modelo e URL fixos (`llama3`, `localhost:11434`). |
+| `netgene-kernel` | 🧪 | 5 agentes em tasks Tokio, barramento de mensagens, memória e registro local de agentes. | A saída do LLM vira ação sem motor de políticas. O marketplace não verifica assinatura. |
+| `netgene-safeguard` | 🧪 | Detecção de anomalias por z-score em janela deslizante. | As ações de "self-healing" são apenas registradas, não executadas. |
+| `netgene-wasm` | ⛔ | Valida o tamanho e o cabeçalho e compila o módulo com `wasmtime`. | Não executa o módulo. A assinatura não é verificada. |
+| `netgene-vault` | ⛔ | Fragmenta arquivos e cifra cada pedaço com AES-256-GCM. | A chave é gerada a cada execução e não é salva, então os arquivos ficam irrecuperáveis depois de reiniciar. |
+| `netgene-desktop` | 🧪 | Painel de nós, eventos, agentes, marketplace, vault e terminal de intenções. | Sem autenticação local. Depende dos limites acima. |
+| `netgene-cli` | ✅ | Comandos `gene`, `agent`, `store`, `llm`, `p2p`, `wasm`, `vault`. | — |
+
+**Removido na versão 0.3.0:** os módulos quântico/QAOA, QPU, BCI neural, DAO, TPM, eBPF, Kubernetes, IoT lite, cloud mesh, builder, TUI e o "FHE". Eles eram simulados (valores fixos ou verificações que sempre aceitavam) e davam garantias que não existiam. O histórico do git preserva o código. Alguns podem voltar quando houver uma implementação real (por exemplo, eBPF com `aya` ou TPM com `tss-esapi`). O motivo de cada remoção está em [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md).
 
 ---
 
-## 💻 Quickstart & Local Execution / Como Executar
+## Como executar
 
-### Prerequisites
-- [Rust & Cargo](https://rustup.rs/) (1.80+ recommended)
-- [Node.js](https://nodejs.org/) (v18+ for Desktop GUI)
-- [CCompiler / Build Tools] (gcc/clang on Linux, MSVC on Windows)
+**Pré-requisitos:** [Rust](https://rustup.rs/) estável (testado com 1.94), [Node.js](https://nodejs.org/) 20+ para o desktop e, opcionalmente, [Ollama](https://ollama.com/) com o modelo `llama3`.
 
-### 1. Seed Synthetic Telemetry Data
 ```bash
-cargo run -p netgene-cli -- seed data
+cd netgene-core
+cargo test --workspace
 ```
 
-### 2. Run the Terminal Dashboard (TUI)
 ```bash
-cargo run -p netgene-tui
+cargo run -p netgene-cli -- gene init --name minha-identidade
 ```
 
-### 3. Launch Desktop GUI (Tauri + React)
 ```bash
-cd netgene-desktop
-npm install
-npm run tauri dev
+cargo run -p netgene-cli -- p2p listen --port 7777
+```
+
+```bash
+cd netgene-desktop && npm install && npm run tauri dev
+```
+
+**Docker** (nó P2P headless):
+
+```bash
+docker build -t netgene netgene-core
 ```
 
 ---
 
-## 🛡️ Security & Privacy Assurance
+## Roadmap
 
-NetGene OS is designed with **Privacy-First & Zero-Trust Architecture**:
-- All cryptographic keys remain strictly inside local Hardware TPMs or post-quantum vaults.
-- Telemetry & LLM inferences execute **100% locally** (no remote tracking or secret leaks).
-- Repository contains **zero hardcoded API keys or credentials**.
+O plano completo está em [ROADMAP.md](ROADMAP.md). Resumo:
+
+1. **Fase 0 (concluída):** higiene do repositório, CI funcional, licença e documentação honesta.
+2. **Fase 1:** fechar as falhas críticas (persistência da chave do vault, assinatura WASM verificada, sanitização do marketplace, chaves privadas cifradas, autorização de peers, passkeys reais).
+3. **Fase 2:** núcleo real. Identidade híbrida pós-quântica (Ed25519 + ML-DSA), malha autenticada, runtime WASM com permissões, motor de políticas para as ações do LLM e `redb`.
+4. **Fase 3:** produto. Marketplace assinado, app mobile, eBPF no Linux, SSO e integrações empresariais.
 
 ---
 
-## 📄 License
+## Segurança
 
-Distributed under the **MIT License** and **Apache License 2.0**. See `LICENSE` for details.
+Não use o NetGene OS para proteger dados reais antes da Fase 1. Para reportar uma vulnerabilidade, abra uma *security advisory* privada no GitHub em vez de uma issue pública.
+
+## Licença
+
+Distribuído sob [MIT](LICENSE-MIT) **ou** [Apache-2.0](LICENSE-APACHE), à sua escolha.

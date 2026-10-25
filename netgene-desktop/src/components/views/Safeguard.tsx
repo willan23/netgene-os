@@ -99,11 +99,11 @@ export function Safeguard() {
          <div className="space-y-6">
             <div>
               <div className="flex justify-between font-mono text-sm mb-2">
-                <span className="flex items-center gap-2"><Lock size={16} /> Zero Trust Policy Enforced</span>
+                <span className="flex items-center gap-2"><Lock size={16} /> Zero Trust Policy</span>
                 <span className="text-cyan-neon font-bold">{safeguard.zero_trust}</span>
               </div>
               <div className="w-full bg-black rounded-full h-2 border border-cyan-neon/30">
-                <div className="bg-cyan-neon h-1.5 rounded-full" style={{ width: '100%' }}></div>
+                <div className="bg-cyan-neon h-1.5 rounded-full" style={{ width: safeguard.zero_trust === 'NOT_IMPLEMENTED' ? '0%' : '100%' }}></div>
               </div>
             </div>
 

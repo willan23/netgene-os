@@ -3,13 +3,17 @@ import { useStore } from '../store';
 import { Activity, Zap, ShieldAlert, Cpu } from 'lucide-react';
 
 export const DashboardCards = () => {
-  const { health, uptime, latency, anomalies } = useStore();
+  const { health, uptime_seconds, known_nodes, anomalies } = useStore();
+
+  const uptime = uptime_seconds < 3600
+    ? `${Math.floor(uptime_seconds / 60)}m ${uptime_seconds % 60}s`
+    : `${Math.floor(uptime_seconds / 3600)}h ${Math.floor((uptime_seconds % 3600) / 60)}m`;
 
   const cards = [
-    { title: 'Network Status', value: health, icon: Activity, color: 'text-green-neon' },
-    { title: 'Latency (avg)', value: `${latency} ms`, icon: Zap, color: 'text-cyan-neon' },
+    { title: 'Node Status', value: health, icon: Activity, color: 'text-green-neon' },
+    { title: 'Known Nodes', value: known_nodes.toString(), icon: Zap, color: 'text-cyan-neon' },
     { title: 'Anomalies', value: anomalies.toString(), icon: ShieldAlert, color: anomalies > 0 ? 'text-magenta-neon' : 'text-cyan-neon' },
-    { title: 'Uptime', value: `${uptime}%`, icon: Cpu, color: 'text-green-neon' },
+    { title: 'Session Uptime', value: uptime, icon: Cpu, color: 'text-green-neon' },
   ];
 
   return (

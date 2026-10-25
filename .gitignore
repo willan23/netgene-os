@@ -37,3 +37,6 @@ private/
 .DS_Store
 Thumbs.db
 *.log
+
+# NetGene runtime data (marketplace registry, local stores)
+.netgene/

@@ -1,35 +1,22 @@
 import React, { useState } from 'react';
 import { useStore } from '../store';
-import { 
-  LayoutDashboard, 
-  Dna, 
-  ShieldAlert, 
-  Cpu, 
-  Network, 
-  Bot, 
-  Globe,
+import {
+  LayoutDashboard,
+  ShieldAlert,
+  Bot,
   Menu,
-  BrainCircuit,
   Share2,
-  Settings,
-  Atom,
-  Landmark,
-  Brain,
   Lock,
   ShoppingCart
 } from 'lucide-react';
 
 const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'gene', label: 'Gene Layer', icon: Dna },
   { id: 'safeguard', label: 'Safeguard', icon: ShieldAlert },
-  { id: 'quantum', label: 'Quantum Module', icon: Cpu },
   { id: 'topology', label: 'Network Topology', icon: Share2 },
   { id: 'agents', label: 'BDI Agents', icon: Bot },
   { id: 'marketplace', label: 'Gene Market', icon: ShoppingCart },
   { id: 'vault', label: 'Personal Vault', icon: Lock },
-  { id: 'governance', label: 'DAO Governance', icon: Landmark },
-  { id: 'neural', label: 'Neural BCI', icon: Brain },
 ];
 
 export function Sidebar() {

@@ -27,7 +27,7 @@ export const IntentTerminal = () => {
   };
 
   const suggestions = [
-    "Spawn 3 Quantum Nodes",
+    "Spawn 3 Edge Nodes",
     "Optimize Routes",
     "Heal Network",
     "System Status"
