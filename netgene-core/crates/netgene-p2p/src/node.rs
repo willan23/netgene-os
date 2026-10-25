@@ -7,7 +7,7 @@ use libp2p::{
     swarm::{Swarm, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, StreamProtocol, Transport,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use libp2p::futures::StreamExt;
@@ -15,12 +15,16 @@ use tracing::{info, warn};
 use netgene_gene::crypto::GeneKeyPair;
 use netgene_gene::HybridPublicKey;
 
-use crate::behaviour::{NetGeneBehaviour, NetGeneBehaviourEvent, PqRequest, PqResponse, PQ_PROTOCOL};
+use crate::behaviour::{NetGeneBehaviour, NetGeneBehaviourEvent, PqRequest, PqResponse, PrivatePayload, PQ_PROTOCOL};
 use crate::events::MeshMessage;
+use crate::groupcrypt::{EncryptedGossip, GroupCrypto, SenderKeyAnnouncement};
 use crate::identity::{libp2p_keypair_from_gene, peer_id_for_key};
 use crate::pqsession::{self, PendingInitiator, Session};
 
-pub const GOSSIPSUB_TOPIC: &str = "netgene-mesh-v1";
+/// v2: payloads are [`EncryptedGossip`] (sender keys over PQ sessions).
+pub const GOSSIPSUB_TOPIC: &str = "netgene-mesh-v2";
+/// Gossip kept per author while its sender key has not arrived yet.
+const MAX_PENDING_GOSSIP: usize = 64;
 
 /// Which peers this node talks to.
 #[derive(Debug, Clone)]
@@ -43,7 +47,8 @@ impl PeerPolicy {
 /// What the application asks the node to send.
 #[derive(Debug, Clone)]
 pub enum Outbound {
-    /// Signed gossip to every subscribed peer (authenticated, classical transport).
+    /// Gossip to every member: signed by the author and encrypted with its
+    /// sender key, which members only receive over post-quantum sessions.
     Broadcast(MeshMessage),
     /// End-to-end message over a hybrid X25519 + ML-KEM-768 session.
     Private { to: PeerId, msg: MeshMessage },
@@ -66,7 +71,9 @@ pub struct NetGeneP2PNode {
     pinned_keys: HashMap<PeerId, HybridPublicKey>,
     sessions: HashMap<PeerId, Session>,
     pending: HashMap<PeerId, PendingInitiator>,
-    outbox: HashMap<PeerId, Vec<MeshMessage>>,
+    outbox: HashMap<PeerId, Vec<PrivatePayload>>,
+    group: GroupCrypto,
+    pending_gossip: HashMap<PeerId, VecDeque<EncryptedGossip>>,
     inbound_tx: mpsc::Sender<Inbound>,
     outbound_rx: mpsc::Receiver<Outbound>,
 }
@@ -136,10 +143,13 @@ impl NetGeneP2PNode {
         let (out_tx, out_rx) = mpsc::channel(100);
         let (in_tx, in_rx) = mpsc::channel(100);
 
+        let group = GroupCrypto::new(&gene_kp, chrono::Utc::now())?;
         let node = Self {
             peer_id,
             swarm,
             policy,
+            group,
+            pending_gossip: HashMap::new(),
             gene_kp,
             pinned_keys: HashMap::new(),
             sessions: HashMap::new(),
@@ -190,18 +200,21 @@ impl NetGeneP2PNode {
     async fn session_ready(&mut self, peer: PeerId) {
         info!("🔐 Post-quantum session established with {} (X25519 + ML-KEM-768)", peer);
         let _ = self.inbound_tx.send(Inbound::SessionEstablished { peer }).await;
-        for msg in self.outbox.remove(&peer).unwrap_or_default() {
-            self.send_private(peer, msg);
+        // The peer gets every sender key we know, so it can read the mesh's gossip.
+        let keys = self.group.all_announcements(chrono::Utc::now());
+        self.send_private(peer, PrivatePayload::SenderKeys(keys));
+        for payload in self.outbox.remove(&peer).unwrap_or_default() {
+            self.send_private(peer, payload);
         }
     }
 
-    fn send_private(&mut self, peer: PeerId, msg: MeshMessage) {
+    fn send_private(&mut self, peer: PeerId, payload: PrivatePayload) {
         let Some(session) = self.sessions.get_mut(&peer) else {
-            self.outbox.entry(peer).or_default().push(msg);
+            self.outbox.entry(peer).or_default().push(payload);
             self.start_handshake(peer);
             return;
         };
-        match serde_json::to_vec(&msg).map_err(anyhow::Error::from).and_then(|bytes| session.seal(&bytes)) {
+        match serde_json::to_vec(&payload).map_err(anyhow::Error::from).and_then(|bytes| session.seal(&bytes)) {
             Ok(frame) => {
                 self.swarm.behaviour_mut().pq.send_request(&peer, PqRequest::Data(frame));
             }
@@ -209,36 +222,114 @@ impl NetGeneP2PNode {
         }
     }
 
-    fn handle_request(&mut self, peer: PeerId, request: PqRequest) -> (PqResponse, Option<Inbound>, bool) {
+    /// Send sender keys to every session except `except`.
+    fn forward_keys(&mut self, keys: Vec<SenderKeyAnnouncement>, except: &[PeerId]) {
+        if keys.is_empty() {
+            return;
+        }
+        let peers: Vec<PeerId> = self.sessions.keys().filter(|p| !except.contains(p)).copied().collect();
+        for peer in peers {
+            self.send_private(peer, PrivatePayload::SenderKeys(keys.clone()));
+        }
+    }
+
+    /// Store new sender keys from `from`, forward them, and release buffered gossip they unlock.
+    fn accept_sender_keys(&mut self, from: PeerId, keys: Vec<SenderKeyAnnouncement>) -> Vec<Inbound> {
+        let now = chrono::Utc::now();
+        let mut fresh = Vec::new();
+        for ann in keys {
+            let Ok(author) = crate::identity::peer_id_for_key(&ann.author_key) else { continue };
+            if !self.policy.allows(&author) {
+                warn!("🚫 Ignoring sender key of non-member {} (via {})", author, from);
+                continue;
+            }
+            match self.group.accept_announcement(&ann, now) {
+                Ok(true) => fresh.push((author, ann)),
+                Ok(false) => {}
+                Err(e) => warn!("🚫 Sender key from {} refused: {}", from, e),
+            }
+        }
+        let mut delivered = Vec::new();
+        for (author, _) in &fresh {
+            let queued: Vec<EncryptedGossip> = self.pending_gossip.remove(author).map(Vec::from).unwrap_or_default();
+            let mut still_waiting = VecDeque::new();
+            for msg in queued {
+                if self.group.has_key(author, msg.key_id) {
+                    delivered.extend(self.open_gossip(*author, &msg));
+                } else {
+                    still_waiting.push_back(msg);
+                }
+            }
+            if !still_waiting.is_empty() {
+                self.pending_gossip.insert(*author, still_waiting);
+            }
+        }
+        let authors: Vec<PeerId> = fresh.iter().map(|(a, _)| *a).collect();
+        let mut except = authors;
+        except.push(from);
+        self.forward_keys(fresh.into_iter().map(|(_, ann)| ann).collect(), &except);
+        delivered
+    }
+
+    fn open_gossip(&mut self, author: PeerId, msg: &EncryptedGossip) -> Option<Inbound> {
+        let opened = self
+            .group
+            .open(&author, msg, chrono::Utc::now())
+            .and_then(|bytes| Ok(serde_json::from_slice::<MeshMessage>(&bytes)?));
+        match opened {
+            Ok(msg) => Some(Inbound::Gossip { from: Some(author), msg }),
+            Err(e) => {
+                warn!("🚫 Gossip from {} dropped: {}", author, e);
+                None
+            }
+        }
+    }
+
+    fn broadcast(&mut self, topic: &gossipsub::IdentTopic, msg: &MeshMessage) -> Result<()> {
+        if let Some(ann) = self.group.rotate_if_due(&self.gene_kp, chrono::Utc::now())? {
+            info!("🔄 Rotated gossip sender key ({})", ann.key_id);
+            self.forward_keys(vec![ann], &[]);
+        }
+        let sealed = self.group.seal(&serde_json::to_vec(msg)?)?;
+        self.swarm
+            .behaviour_mut()
+            .gossipsub
+            .publish(topic.clone(), serde_json::to_vec(&sealed)?)
+            .map_err(|e| anyhow::anyhow!("Gossipsub publish error: {}", e))?;
+        Ok(())
+    }
+
+    fn handle_request(&mut self, peer: PeerId, request: PqRequest) -> (PqResponse, Vec<Inbound>, bool) {
         if !self.policy.allows(&peer) {
-            return (PqResponse::Reject("peer not allowed".into()), None, false);
+            return (PqResponse::Reject("peer not allowed".into()), vec![], false);
         }
         match request {
             PqRequest::Init(init) => {
                 // Simultaneous handshakes: the lower PeerId's Init wins.
                 if self.pending.contains_key(&peer) && self.peer_id < peer {
-                    return (PqResponse::Reject("handshake already in progress".into()), None, false);
+                    return (PqResponse::Reject("handshake already in progress".into()), vec![], false);
                 }
                 if let Err(e) = self.check_pinned(&peer, &init.initiator_key) {
-                    return (PqResponse::Reject(e.to_string()), None, false);
+                    return (PqResponse::Reject(e.to_string()), vec![], false);
                 }
                 match pqsession::respond(&self.gene_kp, &init, &peer) {
                     Ok((session, resp)) => {
                         self.pending.remove(&peer);
                         self.sessions.insert(peer, session);
-                        (PqResponse::Accept(resp), None, true)
+                        (PqResponse::Accept(resp), vec![], true)
                     }
-                    Err(e) => (PqResponse::Reject(e.to_string()), None, false),
+                    Err(e) => (PqResponse::Reject(e.to_string()), vec![], false),
                 }
             }
             PqRequest::Data(frame) => {
                 let Some(session) = self.sessions.get_mut(&peer) else {
-                    return (PqResponse::Reject("no session".into()), None, false);
+                    return (PqResponse::Reject("no session".into()), vec![], false);
                 };
-                let opened = session.open(&frame).and_then(|bytes| Ok(serde_json::from_slice::<MeshMessage>(&bytes)?));
+                let opened = session.open(&frame).and_then(|bytes| Ok(serde_json::from_slice::<PrivatePayload>(&bytes)?));
                 match opened {
-                    Ok(msg) => (PqResponse::Ack, Some(Inbound::Private { from: peer, msg }), false),
-                    Err(e) => (PqResponse::Reject(e.to_string()), None, false),
+                    Ok(PrivatePayload::Mesh(msg)) => (PqResponse::Ack, vec![Inbound::Private { from: peer, msg }], false),
+                    Ok(PrivatePayload::SenderKeys(keys)) => (PqResponse::Ack, self.accept_sender_keys(peer, keys), false),
+                    Err(e) => (PqResponse::Reject(e.to_string()), vec![], false),
                 }
             }
         }
@@ -252,13 +343,11 @@ impl NetGeneP2PNode {
             tokio::select! {
                 Some(outbound) = self.outbound_rx.recv() => match outbound {
                     Outbound::Broadcast(msg) => {
-                        if let Ok(bytes) = serde_json::to_vec(&msg) {
-                            if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), bytes) {
-                                warn!("Gossipsub publish error: {}", e);
-                            }
+                        if let Err(e) = self.broadcast(&topic, &msg) {
+                            warn!("Broadcast failed: {}", e);
                         }
                     }
-                    Outbound::Private { to, msg } => self.send_private(to, msg),
+                    Outbound::Private { to, msg } => self.send_private(to, PrivatePayload::Mesh(msg)),
                 },
 
                 event = self.swarm.select_next_some() => match event {
@@ -277,6 +366,7 @@ impl NetGeneP2PNode {
                     SwarmEvent::ConnectionClosed { peer_id, num_established: 0, .. } => {
                         self.sessions.remove(&peer_id);
                         self.pending.remove(&peer_id);
+                        self.outbox.remove(&peer_id);
                     }
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer, addr) in list {
@@ -291,16 +381,30 @@ impl NetGeneP2PNode {
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Gossipsub(gossipsub::Event::Message {
                         propagation_source, message_id, message,
                     })) => {
-                        let author_allowed = message.source.as_ref().is_some_and(|s| self.policy.allows(s));
-                        let parsed = serde_json::from_slice::<MeshMessage>(&message.data);
-                        let accept = self.policy.allows(&propagation_source) && author_allowed && parsed.is_ok();
+                        // Relaying only needs authenticity (signed by a member, well-formed);
+                        // reading needs the author's sender key.
+                        let author = message.source.filter(|s| self.policy.allows(s));
+                        let parsed = serde_json::from_slice::<EncryptedGossip>(&message.data);
+                        let accept = self.policy.allows(&propagation_source) && author.is_some() && parsed.is_ok();
 
                         let verdict = if accept { gossipsub::MessageAcceptance::Accept } else { gossipsub::MessageAcceptance::Reject };
                         let _ = self.swarm.behaviour_mut().gossipsub
                             .report_message_validation_result(&message_id, &propagation_source, verdict);
 
-                        match parsed {
-                            Ok(msg) if accept => { let _ = self.inbound_tx.send(Inbound::Gossip { from: message.source, msg }).await; }
+                        match (author, parsed) {
+                            (Some(author), Ok(sealed)) if accept => {
+                                if self.group.has_key(&author, sealed.key_id) {
+                                    if let Some(inbound) = self.open_gossip(author, &sealed) {
+                                        let _ = self.inbound_tx.send(inbound).await;
+                                    }
+                                } else {
+                                    let queue = self.pending_gossip.entry(author).or_default();
+                                    if queue.len() >= MAX_PENDING_GOSSIP {
+                                        queue.pop_front();
+                                    }
+                                    queue.push_back(sealed);
+                                }
+                            }
                             _ => warn!("🚫 Rejected mesh message from {}", propagation_source),
                         }
                     }
@@ -311,7 +415,7 @@ impl NetGeneP2PNode {
                                 warn!("🚫 PQ request from {} rejected: {}", peer, reason);
                             }
                             let _ = self.swarm.behaviour_mut().pq.send_response(channel, response);
-                            if let Some(inbound) = inbound {
+                            for inbound in inbound {
                                 let _ = self.inbound_tx.send(inbound).await;
                             }
                             if established {

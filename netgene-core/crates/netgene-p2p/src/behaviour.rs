@@ -6,10 +6,20 @@ use libp2p::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::events::MeshMessage;
+use crate::groupcrypt::SenderKeyAnnouncement;
 use crate::pqsession::{HandshakeInit, HandshakeResp, SealedFrame};
 
-/// Protocol id of the post-quantum private channel.
-pub const PQ_PROTOCOL: &str = "/netgene/pq/1";
+/// Protocol id of the post-quantum private channel (v2: payloads are [`PrivatePayload`]).
+pub const PQ_PROTOCOL: &str = "/netgene/pq/2";
+
+/// What a [`SealedFrame`] decrypts to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PrivatePayload {
+    Mesh(MeshMessage),
+    /// Gossip sender keys (own or forwarded), see [`crate::groupcrypt`].
+    SenderKeys(Vec<SenderKeyAnnouncement>),
+}
 
 /// Requests on the private channel.
 #[derive(Debug, Clone, Serialize, Deserialize)]
