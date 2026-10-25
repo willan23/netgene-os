@@ -1,25 +1,17 @@
 //! # Netsphere Kernel
 //!
-//! The collective intelligence layer of NetGene OS.
-//! Orchestrates specialized AI agents via an async message bus.
+//! Turns intents into policy-checked, audited actions:
 //!
-//! ## Architecture
 //! ```text
-//! ┌──────────────────────────────────────────┐
-//! │              Netsphere Kernel             │
-//! │  ┌──────────┐ ┌──────────┐ ┌──────────┐ │
-//! │  │ Builder  │ │ Monitor  │ │Optimizer │ │
-//! │  │  Agent   │ │  Agent   │ │  Agent   │ │
-//! │  └────┬─────┘ └────┬─────┘ └────┬─────┘ │
-//! │       └────────────┼────────────┘        │
-//! │              Message Bus                 │
-//! │           (Tokio channels)               │
-//! └──────────────────────────────────────────┘
+//! intent --> LLM / rules --> Action --> PolicyEngine --> allow | confirm | deny
+//!            (proposes only)                 |               (human, optional
+//!                                            v                Windows Hello)
+//!                                        Executor --> result --> signed audit log
+//!                          (genes, host metrics, signed WASM agents)
 //! ```
 
 pub mod agent;
-pub mod bus;
-pub mod intent;
+pub mod executor;
 pub mod memory;
 pub mod kernel;
 pub mod error;
@@ -27,27 +19,19 @@ pub mod marketplace;
 pub mod reputation;
 
 pub use kernel::{DispatchOutcome, KernelConfig, NetSphereKernel};
-pub use agent::{Agent, AgentId, AgentStatus, AgentMessage};
-pub use bus::MessageBus;
-pub use intent::{Intent, IntentParser, IntentAction};
+pub use agent::{AgentId, AgentInfo, AgentStatus};
+pub use executor::Workspace;
 pub use error::KernelError;
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Kernel boots with 5 agents and returns a valid agent list.
+    /// A fresh kernel has no installed agents (nothing is invented).
     #[tokio::test]
-    async fn test_kernel_boot_has_five_agents() {
+    async fn test_kernel_boot_lists_only_real_agents() {
         let kernel = NetSphereKernel::boot().await.expect("kernel boot failed");
-        let agents = kernel.agent_list().await;
-        assert_eq!(agents.len(), 5, "Expected exactly 5 agents");
-        let names: Vec<_> = agents.iter().map(|a| a.name.as_str()).collect();
-        assert!(names.contains(&"BuilderAgent"));
-        assert!(names.contains(&"MonitorAgent"));
-        assert!(names.contains(&"OptimizerAgent"));
-        assert!(names.contains(&"NetworkAgent"));
-        assert!(names.contains(&"EvolutionAgent"));
+        assert!(kernel.agent_list().await.is_empty());
     }
 
     /// A state-changing intent waits for confirmation, then executes.
@@ -60,17 +44,18 @@ mod tests {
         };
         assert_eq!(action.kind, "node.provision");
 
-        let confirmed = kernel.confirm(proposal_id).await.unwrap();
-        assert!(matches!(confirmed, DispatchOutcome::Executed { .. }));
+        let DispatchOutcome::Executed { result, .. } = kernel.confirm(proposal_id).await.unwrap() else {
+            panic!("expected execution");
+        };
+        assert_eq!(result["created"].as_array().unwrap().len(), 2, "two real sub-genes");
         assert!(kernel.confirm(proposal_id).await.is_err(), "a proposal can only be confirmed once");
     }
 
-    /// Optimisation also changes state, so it is held for confirmation.
+    /// There is no routing optimizer, so the intent is refused instead of faked.
     #[tokio::test]
-    async fn test_kernel_optimize_is_pending() {
+    async fn test_kernel_optimize_is_not_executable() {
         let kernel = NetSphereKernel::boot().await.unwrap();
-        let result = kernel.dispatch_intent("optimize routes").await.unwrap();
-        assert!(result.contains("Confirmation required"), "unexpected result: {result}");
+        assert!(matches!(kernel.propose_intent("optimize routes").await.unwrap(), DispatchOutcome::Denied { action: None, .. }));
     }
 
     /// Read-only intents run immediately (unknown text falls back to a status query).
@@ -137,7 +122,7 @@ mod tests {
         let boot = |grants| {
             let (operator, operator_kp) = (agent.clone(), netgene_gene::crypto::GeneKeyPair::from_pkcs8(agent_kp.pkcs8_bytes().to_vec()).unwrap());
             NetSphereKernel::boot_with(KernelConfig {
-                operator, operator_kp, policy: netgene_policy::Policy::default(), audit_path: None, grants, presence_key: None,
+                operator, operator_kp, grants, ..KernelConfig::ephemeral().unwrap()
             })
         };
 
@@ -215,5 +200,121 @@ mod tests {
     async fn test_kernel_shutdown() {
         let kernel = NetSphereKernel::boot().await.unwrap();
         kernel.shutdown().await.expect("shutdown should succeed");
+    }
+
+    /// Provisioned genes are real children of the operator, saved with their keys.
+    #[tokio::test]
+    async fn test_provision_saves_verifiable_sub_genes() {
+        use netgene_gene::storage::{list_genes, load_gene};
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = KernelConfig::ephemeral().unwrap();
+        let operator = config.operator.clone();
+        config.workspace.gene_dir = Some(dir.path().join("genes"));
+        let secrets = config.workspace.secrets.clone();
+        let store = config.workspace.store.clone();
+        let kernel = NetSphereKernel::boot_with(config).await.unwrap();
+
+        let action = netgene_policy::Action::new("node.provision", serde_json::json!({"count": 2, "template": "edge"}));
+        let DispatchOutcome::PendingConfirmation { proposal_id, .. } = kernel.propose_action("test", action, String::new()).await.unwrap() else {
+            panic!("expected confirmation");
+        };
+        kernel.confirm(proposal_id).await.unwrap();
+
+        let genes = list_genes(&dir.path().join("genes")).unwrap();
+        assert_eq!(genes.len(), 2);
+        let lineage = netgene_gene::storage::trusted_lineage(&operator, &[vec![operator.clone()], genes.clone()].concat());
+        for gene in &genes {
+            assert_eq!(gene.parent_id, Some(operator.id));
+            assert!(lineage.iter().any(|g| g.id == gene.id), "lineage signed by the operator");
+            load_gene(&gene.id.to_string(), &dir.path().join("genes"), secrets.as_ref()).expect("key stored");
+        }
+        assert_eq!(store.list_nodes().unwrap().len(), 2);
+    }
+
+    /// The scan samples real host metrics.
+    #[tokio::test]
+    async fn test_scan_samples_host_metrics() {
+        let kernel = NetSphereKernel::boot().await.unwrap();
+        let action = netgene_policy::Action::new("safeguard.scan", serde_json::json!({}));
+        let DispatchOutcome::Executed { result, .. } = kernel.propose_action("scan", action, String::new()).await.unwrap() else {
+            panic!("reads run immediately");
+        };
+        let samples = result["samples"].as_object().unwrap();
+        assert!(samples["host.processes"].as_f64().unwrap() > 0.0);
+        assert!((0.0..=100.0).contains(&samples["host.memory_percent"].as_f64().unwrap()));
+    }
+
+    /// Counts its runs in the KV store and echoes its input.
+    const COUNTER_AGENT: &str = r#"(module
+        (import "netgene" "kv_get" (func $get (param i32 i32 i32 i32) (result i32)))
+        (import "netgene" "kv_set" (func $set (param i32 i32 i32 i32) (result i32)))
+        (import "netgene" "input_read" (func $read (param i32 i32) (result i32)))
+        (import "netgene" "output_write" (func $write (param i32 i32) (result i32)))
+        (memory (export "memory") 1)
+        (data (i32.const 0) "runs")
+        (func (export "run") (result i32)
+            (local $n i32) (local $len i32)
+            (drop (call $get (i32.const 0) (i32.const 4) (i32.const 16) (i32.const 4)))
+            (local.set $n (i32.add (i32.load (i32.const 16)) (i32.const 1)))
+            (i32.store (i32.const 16) (local.get $n))
+            (drop (call $set (i32.const 0) (i32.const 4) (i32.const 16) (i32.const 4)))
+            (local.set $len (call $read (i32.const 64) (i32.const 1024)))
+            (drop (call $write (i32.const 64) (local.get $len)))
+            (local.get $n)))"#;
+
+    async fn kernel_with_agents(policy: netgene_policy::Policy) -> (NetSphereKernel, netgene_gene::NetGene, netgene_gene::crypto::GeneKeyPair, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = KernelConfig::ephemeral().unwrap();
+        config.policy = policy;
+        config.workspace.agents_dir = Some(dir.path().join("agents"));
+        let (operator, kp) = (config.operator.clone(), config.operator_kp.try_clone().unwrap());
+        (NetSphereKernel::boot_with(config).await.unwrap(), operator, kp, dir)
+    }
+
+    async fn run_agent(kernel: &NetSphereKernel, input: &str) -> anyhow::Result<serde_json::Value> {
+        let action = netgene_policy::Action::new("agent.run", serde_json::json!({"agent": "counter", "input": input}));
+        let DispatchOutcome::PendingConfirmation { proposal_id, .. } = kernel.propose_action("run", action, String::new()).await? else {
+            panic!("agent.run changes state, so it is confirmed");
+        };
+        match kernel.confirm(proposal_id).await? {
+            DispatchOutcome::Executed { result, .. } => Ok(result),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wasm_agent_runs_with_persistent_kv() {
+        let (kernel, operator, kp, _dir) = kernel_with_agents(netgene_policy::Policy::default()).await;
+        let wasm = wat::parse_str(COUNTER_AGENT).unwrap();
+        let module = netgene_wasm::GeneModule::sign("counter", "1.0.0", &wasm, vec!["io".into(), "kv".into()], &operator, &kp).unwrap();
+        kernel.install_wasm_agent(&module).await.unwrap();
+        assert_eq!(kernel.agent_list().await.len(), 1);
+
+        let first = run_agent(&kernel, "hello").await.unwrap();
+        assert_eq!(first["output"], "hello");
+        assert_eq!(first["return_value"], 1);
+        let second = run_agent(&kernel, "again").await.unwrap();
+        assert_eq!(second["return_value"], 2, "KV state persisted between runs");
+
+        let audit = kernel.audit_entries().await.unwrap();
+        assert!(audit.iter().any(|e| e.record.decision == "executed" && e.record.action.as_deref() == Some("agent.run")));
+    }
+
+    #[tokio::test]
+    async fn test_untrusted_or_unpermitted_agents_refused() {
+        let wasm = wat::parse_str(COUNTER_AGENT).unwrap();
+
+        let (kernel, _, _, _dir) = kernel_with_agents(netgene_policy::Policy::default()).await;
+        let (stranger, stranger_kp) = netgene_gene::NetGene::generate_master("stranger").unwrap();
+        let foreign = netgene_wasm::GeneModule::sign("counter", "1.0.0", &wasm, vec!["io".into(), "kv".into()], &stranger, &stranger_kp).unwrap();
+        assert!(kernel.install_wasm_agent(&foreign).await.is_err(), "author outside the operator's lineage");
+
+        let no_kv = netgene_policy::Policy { agent_permissions: vec!["io".into()], ..Default::default() };
+        let (kernel, operator, kp, _dir2) = kernel_with_agents(no_kv).await;
+        let module = netgene_wasm::GeneModule::sign("counter", "1.0.0", &wasm, vec!["io".into(), "kv".into()], &operator, &kp).unwrap();
+        kernel.install_wasm_agent(&module).await.unwrap();
+        let err = run_agent(&kernel, "x").await.unwrap_err();
+        assert!(format!("{err:#}").contains("kv"), "policy withholds kv: {err:#}");
+        assert_eq!(kernel.audit_entries().await.unwrap().last().unwrap().record.decision, "failed");
     }
 }

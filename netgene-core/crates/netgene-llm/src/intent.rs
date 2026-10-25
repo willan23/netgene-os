@@ -49,6 +49,29 @@ impl LlmIntentEngine {
 
     fn fallback_parse(&self, input: &str) -> Result<LlmParsedIntent> {
         let input_lower = input.to_lowercase();
+        let words: Vec<&str> = input_lower.split_whitespace().collect();
+
+        // "run agent <name> [with <input>]"
+        if let Some(pos) = words.windows(2).position(|w| w[0] == "run" && w[1] == "agent") {
+            if let Some(name) = words.get(pos + 2) {
+                let input_text = input
+                    .split_once(" with ")
+                    .map(|(_, rest)| rest.trim().to_string())
+                    .unwrap_or_default();
+                return Ok(LlmParsedIntent {
+                    action: "run_agent".to_string(),
+                    parameters: serde_json::json!({ "agent": name, "input": input_text }),
+                    explanation: format!("Fallback: run agent {}", name),
+                });
+            }
+        }
+        if words.contains(&"agents") {
+            return Ok(LlmParsedIntent {
+                action: "list_agents".to_string(),
+                parameters: serde_json::json!({}),
+                explanation: "Fallback: list installed agents".to_string(),
+            });
+        }
 
         if input_lower.contains("spawn") || input_lower.contains("create") || input_lower.contains("provision") {
             let count = extract_number(&input_lower).unwrap_or(1);
@@ -69,11 +92,10 @@ impl LlmIntentEngine {
                 explanation: format!("Fallback: provision {} {} node(s)", count, template),
             })
         } else if input_lower.contains("optimize") || input_lower.contains("route") {
-            let nodes = extract_number(&input_lower).unwrap_or(8);
             Ok(LlmParsedIntent {
-                action: "optimize_network".to_string(),
-                parameters: serde_json::json!({ "nodes": nodes }),
-                explanation: format!("Fallback: optimize routing for network of {} nodes", nodes),
+                action: "unknown".to_string(),
+                parameters: serde_json::json!({}),
+                explanation: "NetGene has no routing optimizer; nothing to run".to_string(),
             })
         } else if input_lower.contains("scan") || input_lower.contains("safeguard") || input_lower.contains("heal") {
             Ok(LlmParsedIntent {

@@ -40,7 +40,7 @@ hex = "0.4"
 base64 = "0.22"
 
 # Unique IDs
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "color", "env"] }

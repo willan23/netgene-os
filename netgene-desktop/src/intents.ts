@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type Action = { kind: string; params: Record<string, unknown> };
 export type DispatchOutcome =
-  | { status: 'executed'; action: Action; explanation: string }
+  | { status: 'executed'; action: Action; explanation: string; result: unknown }
   | { status: 'pending_confirmation'; proposal_id: string; action: Action; reason: string; explanation: string }
   | { status: 'denied'; action: Action | null; reason: string; explanation: string };
 

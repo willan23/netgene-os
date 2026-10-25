@@ -7,7 +7,7 @@ import type { DispatchOutcome } from '../intents';
 
 const describe = (o: DispatchOutcome) => {
   switch (o.status) {
-    case 'executed': return `[EXECUTED] ${o.action.kind} — ${o.explanation}`;
+    case 'executed': return `[EXECUTED] ${o.action.kind} — ${o.explanation}\n${JSON.stringify(o.result, null, 2)}`;
     case 'pending_confirmation': return `[CONFIRM?] ${o.action.kind} — ${o.reason}`;
     case 'denied': return `[DENIED] ${o.reason}`;
   }

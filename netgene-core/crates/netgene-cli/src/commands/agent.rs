@@ -3,7 +3,8 @@
 use clap::Subcommand;
 use anyhow::Result;
 use std::path::PathBuf;
-use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel};
+use std::sync::Arc;
+use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel, Workspace};
 use netgene_kernel::marketplace::{AgentManifest, Marketplace};
 use netgene_kernel::reputation::{AgentReview, ReviewStore};
 use netgene_gene::{storage::{default_gene_dir, list_genes, load_gene, trusted_lineage}, HybridPublicKey};
@@ -19,13 +20,92 @@ fn load_policy() -> Result<Policy> {
     Policy::load_or_default(&netgene_home().join("policy.json"))
 }
 
+fn workspace() -> Result<Workspace> {
+    let secrets: Arc<dyn netgene_gene::SecretStore> = Arc::from(netgene_gene::default_store()?);
+    Ok(Workspace::at(&netgene_home(), default_gene_dir(), secrets, netgene_store::NetGeneStore::open(None)?))
+}
+
+/// Boot a kernel acting as `gene`, with its tokens, presence key, policy and audit log.
+async fn boot_as(gene: &str) -> Result<(NetSphereKernel, Option<PresenceEnrollment>)> {
+    let (operator, operator_kp) = load_gene(gene, &default_gene_dir(), &netgene_gene::default_store()?)?;
+    let grants = grants_for(&operator, &list_genes(&default_gene_dir())?)?;
+    for g in &grants {
+        println!("🎫 Token {} grants [{}] until {}", g.token_id, g.capabilities.join(", "), g.expires_at.format("%Y-%m-%d %H:%M UTC"));
+    }
+    let enrollment = PresenceEnrollment::load(&presence_dir(), operator.id)?;
+    let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
+    let config = KernelConfig {
+        operator, operator_kp, policy: load_policy()?, audit_path: Some(audit_path()), grants, presence_key, workspace: workspace()?,
+    };
+    Ok((NetSphereKernel::boot_with(config).await?, enrollment))
+}
+
+/// Approve a pending proposal when `confirm` is set (with Windows Hello if the policy says so).
+async fn resolve(kernel: &NetSphereKernel, outcome: DispatchOutcome, confirm: bool, enrollment: Option<&PresenceEnrollment>, gene: &str) -> Result<()> {
+    println!("{}", outcome.summary());
+    let DispatchOutcome::PendingConfirmation { proposal_id, .. } = outcome else { return Ok(()) };
+    if !confirm {
+        println!("   Re-run with --confirm to approve. Nothing was executed.");
+        return Ok(());
+    }
+    let outcome = if kernel.requires_user_presence() {
+        let enrollment = enrollment.ok_or_else(|| {
+            anyhow::anyhow!("Policy requires user presence: run `netgene gene enroll-presence --gene {}` first", gene)
+        })?;
+        let challenge = kernel.presence_challenge(proposal_id).await?;
+        println!("🔐 Waiting for Windows Hello approval...");
+        let signed = tokio::task::spawn_blocking({
+            let enrollment = enrollment.clone();
+            move || netgene_presence::sign(&enrollment, &challenge)
+        })
+        .await?;
+        match signed {
+            Ok(signature) => kernel.confirm_with_presence(proposal_id, &signature).await?,
+            Err(e) => {
+                // Cancelled or failed: record the rejection so the audit log shows it.
+                kernel.reject(proposal_id).await?;
+                return Err(e);
+            }
+        }
+    } else {
+        kernel.confirm(proposal_id).await?
+    };
+    println!("{}", outcome.summary());
+    Ok(())
+}
+
 #[derive(Subcommand)]
 pub enum AgentCommand {
-    /// List all active agents
-    List,
+    /// List installed WASM agents and whether their author is trusted
+    List {
+        /// Gene whose lineage defines trusted authors (default: nothing is trusted)
+        #[arg(long)]
+        gene: Option<String>,
+    },
+    /// Install a signed Gene Module (see `wasm sign`) as an agent
+    Install {
+        /// Gene Module JSON
+        module: PathBuf,
+        /// Gene whose lineage must have signed it
+        #[arg(long)]
+        gene: String,
+    },
+    /// Run an installed agent through the policy (agent.run)
+    Run {
+        /// Agent name
+        agent: String,
+        /// Input text handed to the agent (`io` permission)
+        #[arg(long, default_value = "")]
+        input: String,
+        #[arg(long)]
+        gene: String,
+        /// Approve the run if the policy holds it for confirmation
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Propose a natural-language intent; the policy decides whether it runs
     Dispatch {
-        /// Intent string (e.g. "spawn 2 nodes", "optimize routes")
+        /// Intent string (e.g. "spawn 2 nodes", "run agent echo with hi")
         intent: String,
         /// Gene acting as operator (its capabilities are checked; it signs the audit log)
         #[arg(long)]
@@ -92,67 +172,37 @@ pub enum AgentCommand {
 
 pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
     match cmd {
-        AgentCommand::List => {
-            let kernel = NetSphereKernel::boot().await?;
-            println!("🤖 Netsphere Kernel Agents");
-            println!("{}", "─".repeat(50));
-            for agent in kernel.agent_list().await {
-                println!("  • {} [{}] — {:?}", agent.name, agent.agent_type, agent.status);
+        AgentCommand::List { gene } => {
+            let kernel = match gene {
+                Some(gene) => boot_as(&gene).await?.0,
+                None => NetSphereKernel::boot_with(KernelConfig { workspace: workspace()?, ..KernelConfig::ephemeral()? }).await?,
+            };
+            let agents = kernel.agent_list().await;
+            println!("🤖 Installed agents ({})", agents.len());
+            for agent in agents {
+                println!("  • {} [{}] — {}", agent.name, agent.agent_type, agent.status);
             }
-            kernel.shutdown().await?;
+        }
+
+        AgentCommand::Install { module, gene } => {
+            let module: netgene_wasm::GeneModule = serde_json::from_slice(&std::fs::read(&module)?)?;
+            let (kernel, _) = boot_as(&gene).await?;
+            let path = kernel.install_wasm_agent(&module).await?;
+            println!("✅ Installed agent '{}' v{} [{}] at {}", module.name, module.version, module.permissions.join(", "), path.display());
+        }
+
+        AgentCommand::Run { agent, input, gene, confirm } => {
+            let (kernel, enrollment) = boot_as(&gene).await?;
+            let action = netgene_policy::Action::new("agent.run", serde_json::json!({ "agent": agent, "input": input }));
+            let outcome = kernel.propose_action(&format!("agent run {}", agent), action, "requested from the CLI".into()).await?;
+            resolve(&kernel, outcome, confirm, enrollment.as_ref(), &gene).await?;
         }
 
         AgentCommand::Dispatch { intent, gene, confirm } => {
-            let (operator, operator_kp) = load_gene(&gene, &default_gene_dir(), &netgene_gene::default_store()?)?;
-            let grants = grants_for(&operator, &list_genes(&default_gene_dir())?)?;
-            for g in &grants {
-                println!("🎫 Token {} grants [{}] until {}", g.token_id, g.capabilities.join(", "), g.expires_at.format("%Y-%m-%d %H:%M UTC"));
-            }
-            let enrollment = PresenceEnrollment::load(&presence_dir(), operator.id)?;
-            let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
-            let config = KernelConfig {
-                operator, operator_kp, policy: load_policy()?, audit_path: Some(audit_path()), grants, presence_key,
-            };
-            let kernel = NetSphereKernel::boot_with(config).await?;
-
+            let (kernel, enrollment) = boot_as(&gene).await?;
             println!("📡 Proposing intent: \"{}\"", intent);
-            let mut outcome = kernel.propose_intent(&intent).await?;
-            println!("{}", outcome.summary());
-
-            if let DispatchOutcome::PendingConfirmation { proposal_id, .. } = &outcome {
-                if confirm && kernel.requires_user_presence() {
-                    let enrollment = enrollment.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("Policy requires user presence: run `netgene gene enroll-presence --gene {}` first", gene)
-                    })?;
-                    let challenge = kernel.presence_challenge(*proposal_id).await?;
-                    println!("🔐 Waiting for Windows Hello approval...");
-                    let signed = tokio::task::spawn_blocking({
-                        let enrollment = enrollment.clone();
-                        move || netgene_presence::sign(&enrollment, &challenge)
-                    })
-                    .await?;
-                    let signature = match signed {
-                        Ok(signature) => signature,
-                        Err(e) => {
-                            // Cancelled or failed: record the rejection so the audit log shows it.
-                            kernel.reject(*proposal_id).await?;
-                            kernel.shutdown().await?;
-                            return Err(e);
-                        }
-                    };
-                    outcome = kernel.confirm_with_presence(*proposal_id, &signature).await?;
-                    println!("{}", outcome.summary());
-                } else if confirm {
-                    outcome = kernel.confirm(*proposal_id).await?;
-                    println!("{}", outcome.summary());
-                } else {
-                    println!("   Re-run with --confirm to approve. Nothing was executed.");
-                }
-            }
-
-            // Give agents time to process
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            kernel.shutdown().await?;
+            let outcome = kernel.propose_intent(&intent).await?;
+            resolve(&kernel, outcome, confirm, enrollment.as_ref(), &gene).await?;
         }
 
         AgentCommand::Audit { last, export, out } => {
@@ -198,12 +248,13 @@ pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
         }
 
         AgentCommand::Status => {
-            let kernel = NetSphereKernel::boot().await?;
-            println!("🟢 Netsphere Kernel: ONLINE (in-process)");
-            println!("   Agents registered: {}", kernel.agent_list().await.len());
-            println!("   Bus: Tokio MPSC");
-            println!("   Consensus: none (single process)");
-            kernel.shutdown().await?;
+            let kernel = NetSphereKernel::boot_with(KernelConfig { workspace: workspace()?, ..KernelConfig::ephemeral()? }).await?;
+            let policy = load_policy()?;
+            println!("🟢 Netsphere Kernel (in-process, starts per command)");
+            println!("   Installed agents:  {}", kernel.agent_list().await.len());
+            println!("   Actions:           {}", netgene_policy::ACTION_CATALOG.iter().map(|a| a.kind).collect::<Vec<_>>().join(", "));
+            println!("   Agent permissions: {}", policy.agent_permissions.join(", "));
+            println!("   Audit log:         {}", audit_path().display());
         }
 
         AgentCommand::Publish { gene, id, name, version, description, capabilities } => {
