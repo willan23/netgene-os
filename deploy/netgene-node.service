@@ -20,7 +20,7 @@ Environment=NETGENE_SECRET_STORE=file
 Environment=NETGENE_SECRET_PASSPHRASE_FILE=/etc/netgene/passphrase
 Environment=RUST_LOG=info
 EnvironmentFile=/etc/netgene/node.env
-ExecStart=/usr/local/bin/netgene p2p listen --gene ${NETGENE_GENE_ID} --port 7777
+ExecStart=/usr/local/bin/netgene p2p listen --port 7777
 Restart=on-failure
 
 # Hardening
