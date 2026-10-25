@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use netgene_gene::{
     secret::OsKeyring,
     storage::{default_gene_dir, list_genes, load_gene},
+    HybridPublicKey,
 };
 use netgene_wasm::{GeneModule, WasmSandbox, DEFAULT_FUEL};
 
@@ -64,11 +65,11 @@ pub async fn run(cmd: WasmCommand) -> Result<()> {
                 .context("Invalid Gene Module JSON")?;
 
             let genes = list_genes(&dir)?;
-            let trusted: Vec<Vec<u8>> = genes
+            let trusted: Vec<HybridPublicKey> = genes
                 .iter()
                 .filter(|g| trust.is_empty() || trust.iter().any(|t| *t == g.id.to_string()))
-                .map(|g| g.public_key_bytes())
-                .collect::<Result<_>>()?;
+                .map(HybridPublicKey::from_gene)
+                .collect();
             if trusted.is_empty() {
                 anyhow::bail!("No trusted author keys. Create a gene with `netgene gene init` or pass --trust <gene-id>.");
             }
@@ -90,7 +91,7 @@ pub async fn run(cmd: WasmCommand) -> Result<()> {
             println!("   ABI:           export `run: () -> i32`");
             println!("   Memory Limit:  {} MB", MEMORY_LIMIT_BYTES / (1024 * 1024));
             println!("   Fuel (CPU):    {} units per run", DEFAULT_FUEL);
-            println!("   Signatures:    Ed25519 by a trusted gene, mandatory");
+            println!("   Signatures:    hybrid Ed25519 + ML-DSA-65 by a trusted gene, mandatory");
         }
     }
 

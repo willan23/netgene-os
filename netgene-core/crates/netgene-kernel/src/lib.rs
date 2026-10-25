@@ -92,6 +92,70 @@ mod tests {
         netgene_policy::audit::verify_chain(&entries).unwrap();
     }
 
+    /// With `require_user_presence`, only a valid hardware-key signature over
+    /// the exact proposal confirms it (the RSA key here stands in for Windows Hello).
+    #[tokio::test]
+    async fn test_kernel_presence_required() {
+        use ring::rand::SystemRandom;
+        use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
+
+        let key = RsaKeyPair::from_pkcs8(include_bytes!("../../netgene-presence/tests/fixtures/test-only-rsa2048.pk8.der")).unwrap();
+        let sign = |msg: &[u8]| {
+            let mut sig = vec![0u8; key.public().modulus_len()];
+            key.sign(&RSA_PKCS1_SHA256, &SystemRandom::new(), msg, &mut sig).unwrap();
+            sig
+        };
+
+        let mut config = KernelConfig::ephemeral().unwrap();
+        config.policy.require_user_presence = true;
+        config.presence_key = Some(key.public().as_ref().to_vec());
+        let kernel = NetSphereKernel::boot_with(config).await.unwrap();
+
+        let DispatchOutcome::PendingConfirmation { proposal_id, .. } = kernel.propose_intent("spawn 2 nodes").await.unwrap() else {
+            panic!("expected confirmation");
+        };
+        assert!(kernel.confirm(proposal_id).await.is_err(), "plain confirmation is not enough");
+        assert!(kernel.confirm_with_presence(proposal_id, &sign(b"wrong challenge")).await.is_err());
+
+        let challenge = kernel.presence_challenge(proposal_id).await.unwrap();
+        let outcome = kernel.confirm_with_presence(proposal_id, &sign(&challenge)).await.unwrap();
+        assert!(matches!(outcome, DispatchOutcome::Executed { .. }));
+
+        let entries = kernel.audit_entries().await.unwrap();
+        assert!(entries.iter().any(|e| e.record.decision == "presence_failed"));
+        assert!(entries.iter().any(|e| e.record.detail.contains("user presence verified")));
+    }
+
+    /// Capabilities granted by a (verified) token let a delegated gene act.
+    #[tokio::test]
+    async fn test_kernel_uses_active_grants() {
+        use netgene_gene::{GeneRole, NetGene};
+        let (master, master_kp) = NetGene::generate_master("root").unwrap();
+        let (agent, agent_kp) = NetGene::spawn_sub_gene(&master, &master_kp, "agent", GeneRole::Agent, vec!["network.read".into()]).unwrap();
+
+        let boot = |grants| {
+            let (operator, operator_kp) = (agent.clone(), netgene_gene::crypto::GeneKeyPair::from_pkcs8(agent_kp.pkcs8_bytes().to_vec()).unwrap());
+            NetSphereKernel::boot_with(KernelConfig {
+                operator, operator_kp, policy: netgene_policy::Policy::default(), audit_path: None, grants, presence_key: None,
+            })
+        };
+
+        let without = boot(vec![]).await.unwrap();
+        assert!(matches!(without.propose_intent("spawn 1 node").await.unwrap(), DispatchOutcome::Denied { .. }));
+
+        let grant = netgene_policy::Grant {
+            token_id: uuid::Uuid::new_v4(),
+            capabilities: vec!["node.spawn".into()],
+            expires_at: chrono::Utc::now() + chrono::Duration::minutes(5),
+        };
+        let with = boot(vec![grant.clone()]).await.unwrap();
+        assert!(matches!(with.propose_intent("spawn 1 node").await.unwrap(), DispatchOutcome::PendingConfirmation { .. }));
+
+        let expired = netgene_policy::Grant { expires_at: chrono::Utc::now() - chrono::Duration::seconds(1), ..grant };
+        let stale = boot(vec![expired]).await.unwrap();
+        assert!(matches!(stale.propose_intent("spawn 1 node").await.unwrap(), DispatchOutcome::Denied { .. }));
+    }
+
     /// Rejected proposals are audited and cannot be confirmed later.
     #[tokio::test]
     async fn test_kernel_reject_proposal() {

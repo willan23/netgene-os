@@ -1,6 +1,7 @@
 //! Local agent marketplace.
 //!
-//! Every manifest is signed (Ed25519) by the publisher's Gene. Manifests are
+//! Every manifest is signed by the publisher's Gene with a hybrid
+//! (Ed25519 + ML-DSA-65) signature. Manifests are
 //! verified when published, listed and installed; unsigned or tampered files
 //! in the registry directory are ignored.
 
@@ -8,12 +9,11 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use anyhow::{Context, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use tracing::warn;
-use netgene_gene::crypto::{short_fingerprint, verify_signature, GeneKeyPair};
-use netgene_gene::NetGene;
+use netgene_gene::crypto::GeneKeyPair;
+use netgene_gene::{verify_hybrid, HybridPublicKey, HybridSignature, NetGene};
 
-const SIGNING_DOMAIN: &[u8] = b"netgene-agent-manifest-v1\0";
+const SIGNING_DOMAIN: &[u8] = b"netgene-agent-manifest-v2\0";
 const MAX_ID_LEN: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,10 +26,10 @@ pub struct AgentManifest {
     pub capabilities: Vec<String>,
     /// Gene that signed this manifest.
     pub publisher_gene_id: String,
-    /// Publisher's Ed25519 public key (base64).
-    pub publisher_public_key_b64: String,
-    /// Ed25519 signature (base64) over [`AgentManifest::signing_payload`].
-    pub signature_b64: String,
+    /// Publisher's public key (Ed25519 + optional ML-DSA-65).
+    pub publisher_key: HybridPublicKey,
+    /// Hybrid signature over [`AgentManifest::signing_payload`].
+    pub signature: HybridSignature,
 }
 
 /// Agent ids are used as file names: 1–64 chars of `[a-z0-9-]`, no leading `-`.
@@ -68,14 +68,15 @@ impl AgentManifest {
             author: publisher.name.clone(),
             capabilities,
             publisher_gene_id: publisher.id.to_string(),
-            publisher_public_key_b64: publisher.public_key_b64.clone(),
-            signature_b64: String::new(),
+            publisher_key: HybridPublicKey::from_gene(publisher),
+            signature: HybridSignature { ed25519_b64: String::new(), ml_dsa65_b64: None },
         };
-        manifest.signature_b64 = BASE64.encode(publisher_kp.sign(&manifest.signing_payload())?);
+        manifest.signature = publisher_kp.sign_hybrid(&manifest.signing_payload())?;
         Ok(manifest)
     }
 
-    /// Length-prefixed encoding of every field except the signature.
+    /// Length-prefixed encoding of every field except the key and signature
+    /// (the key is bound by [`verify_hybrid`]).
     pub fn signing_payload(&self) -> Vec<u8> {
         fn push(buf: &mut Vec<u8>, field: &str) {
             buf.extend_from_slice(&(field.len() as u32).to_be_bytes());
@@ -84,7 +85,7 @@ impl AgentManifest {
 
         let mut payload = SIGNING_DOMAIN.to_vec();
         for field in [&self.id, &self.name, &self.version, &self.description, &self.author,
-                      &self.publisher_gene_id, &self.publisher_public_key_b64] {
+                      &self.publisher_gene_id] {
             push(&mut payload, field);
         }
         payload.extend_from_slice(&(self.capabilities.len() as u32).to_be_bytes());
@@ -94,12 +95,10 @@ impl AgentManifest {
         payload
     }
 
-    /// Check the id and the publisher's signature.
+    /// Check the id and the publisher's hybrid signature.
     pub fn verify(&self) -> Result<()> {
         validate_agent_id(&self.id)?;
-        let key = BASE64.decode(&self.publisher_public_key_b64).context("Publisher key is not valid base64")?;
-        let sig = BASE64.decode(&self.signature_b64).context("Signature is not valid base64")?;
-        if !verify_signature(&key, &self.signing_payload(), &sig) {
+        if !verify_hybrid(&self.publisher_key, &self.signing_payload(), &self.signature) {
             anyhow::bail!("Invalid signature on agent manifest '{}'", self.id);
         }
         Ok(())
@@ -107,10 +106,7 @@ impl AgentManifest {
 
     /// Short fingerprint of the publisher key, for display.
     pub fn publisher_fingerprint(&self) -> String {
-        BASE64
-            .decode(&self.publisher_public_key_b64)
-            .map(|k| short_fingerprint(&k))
-            .unwrap_or_default()
+        self.publisher_key.short_fingerprint()
     }
 }
 
@@ -240,6 +236,21 @@ mod tests {
 
         let unsigned = r#"{"id":"x","name":"x","version":"1","description":"","author":"","capabilities":[]}"#;
         assert!(market.publish_agent(unsigned).is_err());
+    }
+
+    #[test]
+    fn test_manifest_is_post_quantum_signed() {
+        let manifest = signed("pq-agent");
+        assert!(manifest.publisher_key.is_post_quantum());
+        manifest.verify().unwrap();
+
+        let mut stripped = manifest.clone();
+        stripped.signature.ml_dsa65_b64 = None;
+        assert!(stripped.verify().is_err());
+
+        let mut downgraded = manifest.clone();
+        downgraded.publisher_key.ml_dsa65_b64 = None;
+        assert!(downgraded.verify().is_err());
     }
 
     #[test]

@@ -34,3 +34,4 @@ netgene-vault = { path = "../../netgene-core/crates/netgene-vault" }
 netgene-llm = { path = "../../netgene-core/crates/netgene-llm" }
 netgene-gene = { path = "../../netgene-core/crates/netgene-gene" }
 netgene-policy = { path = "../../netgene-core/crates/netgene-policy" }
+netgene-presence = { path = "../../netgene-core/crates/netgene-presence" }

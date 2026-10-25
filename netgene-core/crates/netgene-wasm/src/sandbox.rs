@@ -1,8 +1,9 @@
 //! WebAssembly Sandbox & Gene Module Verifier.
 //!
-//! A [`GeneModule`] is a WASM binary signed (Ed25519) by a Gene. The sandbox
-//! only runs modules whose author key is in its trust list and whose
-//! signature covers the exact bytes being executed.
+//! A [`GeneModule`] is a WASM binary signed by a Gene with a hybrid
+//! (Ed25519 + ML-DSA-65) signature. The sandbox only runs modules whose
+//! author key exactly matches a trusted key and whose signature covers the
+//! exact bytes being executed.
 //!
 //! ## Module ABI (v1)
 //! The module must export `run: () -> i32` and import nothing: no host
@@ -17,12 +18,12 @@ use tracing::info;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use sha3::{Digest, Sha3_256};
 use wasmtime::{Config, Engine, Instance, Module, Store, StoreLimits, StoreLimitsBuilder};
-use netgene_gene::crypto::{verify_signature, GeneKeyPair};
-use netgene_gene::NetGene;
+use netgene_gene::crypto::GeneKeyPair;
+use netgene_gene::{verify_hybrid, HybridPublicKey, HybridSignature, NetGene};
 
 const MAX_MODULE_BYTES: usize = 10 * 1024 * 1024;
 const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
-const SIGNING_DOMAIN: &[u8] = b"netgene-wasm-module-v1\0";
+const SIGNING_DOMAIN: &[u8] = b"netgene-wasm-module-v2\0";
 
 /// Default CPU budget for one execution.
 pub const DEFAULT_FUEL: u64 = 10_000_000;
@@ -34,10 +35,10 @@ pub struct GeneModule {
     pub name: String,
     pub version: String,
     pub author_gene_id: String,
-    /// Author's Ed25519 public key (base64).
-    pub author_public_key_b64: String,
-    /// Ed25519 signature (base64) over [`GeneModule::signing_payload`].
-    pub signature_b64: String,
+    /// Author's public key (Ed25519 + optional ML-DSA-65).
+    pub author_key: HybridPublicKey,
+    /// Hybrid signature over [`GeneModule::signing_payload`].
+    pub signature: HybridSignature,
     pub wasm_bytes_b64: String,
     pub created_at: DateTime<Utc>,
 }
@@ -62,15 +63,15 @@ impl GeneModule {
             anyhow::bail!("Signing key does not belong to gene {}", author.id);
         }
         let module_id = Uuid::new_v4();
-        let signature = author_kp.sign(&Self::signing_payload(module_id, name, version, wasm))?;
+        let signature = author_kp.sign_hybrid(&Self::signing_payload(module_id, name, version, wasm))?;
 
         Ok(Self {
             module_id,
             name: name.to_string(),
             version: version.to_string(),
             author_gene_id: author.id.to_string(),
-            author_public_key_b64: author.public_key_b64.clone(),
-            signature_b64: BASE64.encode(signature),
+            author_key: HybridPublicKey::from_gene(author),
+            signature,
             wasm_bytes_b64: BASE64.encode(wasm),
             created_at: Utc::now(),
         })
@@ -93,12 +94,13 @@ struct SandboxState {
 pub struct WasmSandbox {
     memory_limit_bytes: usize,
     fuel: u64,
-    trusted_author_keys: Vec<Vec<u8>>,
+    trusted_author_keys: Vec<HybridPublicKey>,
 }
 
 impl WasmSandbox {
-    /// `trusted_author_keys`: raw Ed25519 public keys allowed to sign modules.
-    pub fn new(memory_limit_bytes: usize, trusted_author_keys: Vec<Vec<u8>>) -> Self {
+    /// `trusted_author_keys`: keys allowed to sign modules (matched exactly,
+    /// including the post-quantum half).
+    pub fn new(memory_limit_bytes: usize, trusted_author_keys: Vec<HybridPublicKey>) -> Self {
         Self { memory_limit_bytes, fuel: DEFAULT_FUEL, trusted_author_keys }
     }
 
@@ -118,14 +120,12 @@ impl WasmSandbox {
             anyhow::bail!("Corrupted WASM Module: Invalid WebAssembly magic header");
         }
 
-        let author_key = BASE64.decode(&module.author_public_key_b64).context("Author key is not valid base64")?;
-        if !self.trusted_author_keys.iter().any(|k| *k == author_key) {
+        if !self.trusted_author_keys.iter().any(|k| *k == module.author_key) {
             anyhow::bail!("Security Violation: module author is not trusted by this sandbox");
         }
 
-        let signature = BASE64.decode(&module.signature_b64).context("Signature is not valid base64")?;
         let payload = GeneModule::signing_payload(module.module_id, &module.name, &module.version, &wasm_bytes);
-        if !verify_signature(&author_key, &payload, &signature) {
+        if !verify_hybrid(&module.author_key, &payload, &module.signature) {
             anyhow::bail!("Security Violation: invalid module signature");
         }
 
@@ -195,7 +195,7 @@ mod tests {
     }
 
     fn sandbox_trusting(gene: &NetGene) -> WasmSandbox {
-        WasmSandbox::new(1024 * 1024, vec![gene.public_key_bytes().unwrap()])
+        WasmSandbox::new(1024 * 1024, vec![HybridPublicKey::from_gene(gene)])
     }
 
     fn wasm(src: &str) -> Vec<u8> {
@@ -239,6 +239,20 @@ mod tests {
         module.name = "renamed".to_string();
 
         assert!(sandbox_trusting(&gene).execute(&module).is_err());
+    }
+
+    #[test]
+    fn test_stripped_pq_signature_rejected() {
+        let (gene, kp) = author();
+        let mut module = GeneModule::sign("answer", "1.0.0", &wasm(RETURNS_42), &gene, &kp).unwrap();
+        assert!(module.author_key.is_post_quantum());
+        module.signature.ml_dsa65_b64 = None;
+        assert!(sandbox_trusting(&gene).execute(&module).is_err());
+
+        // Downgrading the declared key no longer matches the trusted key.
+        let mut downgraded = GeneModule::sign("answer", "1.0.0", &wasm(RETURNS_42), &gene, &kp).unwrap();
+        downgraded.author_key.ml_dsa65_b64 = None;
+        assert!(sandbox_trusting(&gene).execute(&downgraded).is_err());
     }
 
     #[test]

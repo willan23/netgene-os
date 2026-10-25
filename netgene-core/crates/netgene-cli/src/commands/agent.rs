@@ -5,16 +5,10 @@ use anyhow::Result;
 use std::path::PathBuf;
 use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel};
 use netgene_kernel::marketplace::{AgentManifest, Marketplace};
-use netgene_gene::{secret::OsKeyring, storage::{default_gene_dir, load_gene}};
+use netgene_gene::{secret::OsKeyring, storage::{default_gene_dir, list_genes, load_gene}};
 use netgene_policy::{AuditLog, Policy};
-
-fn netgene_home() -> PathBuf {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".netgene")
-}
+use super::grants::{grants_for, netgene_home, presence_dir};
+use netgene_presence::PresenceEnrollment;
 
 fn audit_path() -> PathBuf {
     netgene_home().join("audit.jsonl")
@@ -85,7 +79,15 @@ pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
 
         AgentCommand::Dispatch { intent, gene, confirm } => {
             let (operator, operator_kp) = load_gene(&gene, &default_gene_dir(), &OsKeyring::new())?;
-            let config = KernelConfig { operator, operator_kp, policy: load_policy()?, audit_path: Some(audit_path()) };
+            let grants = grants_for(&operator, &list_genes(&default_gene_dir())?)?;
+            for g in &grants {
+                println!("🎫 Token {} grants [{}] until {}", g.token_id, g.capabilities.join(", "), g.expires_at.format("%Y-%m-%d %H:%M UTC"));
+            }
+            let enrollment = PresenceEnrollment::load(&presence_dir(), operator.id)?;
+            let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
+            let config = KernelConfig {
+                operator, operator_kp, policy: load_policy()?, audit_path: Some(audit_path()), grants, presence_key,
+            };
             let kernel = NetSphereKernel::boot_with(config).await?;
 
             println!("📡 Proposing intent: \"{}\"", intent);
@@ -93,7 +95,20 @@ pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
             println!("{}", outcome.summary());
 
             if let DispatchOutcome::PendingConfirmation { proposal_id, .. } = &outcome {
-                if confirm {
+                if confirm && kernel.requires_user_presence() {
+                    let enrollment = enrollment.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!("Policy requires user presence: run `netgene gene enroll-presence --gene {}` first", gene)
+                    })?;
+                    let challenge = kernel.presence_challenge(*proposal_id).await?;
+                    println!("🔐 Waiting for Windows Hello approval...");
+                    let signature = tokio::task::spawn_blocking({
+                        let enrollment = enrollment.clone();
+                        move || netgene_presence::sign(&enrollment, &challenge)
+                    })
+                    .await??;
+                    outcome = kernel.confirm_with_presence(*proposal_id, &signature).await?;
+                    println!("{}", outcome.summary());
+                } else if confirm {
                     outcome = kernel.confirm(*proposal_id).await?;
                     println!("{}", outcome.summary());
                 } else {

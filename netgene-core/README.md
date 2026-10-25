@@ -13,6 +13,7 @@ Workspace Rust do NetGene OS. A visão geral, o estado de cada módulo e o roadm
 | `netgene-wasm` | Sandbox de módulos WASM assinados |
 | `netgene-safeguard` | Detecção de anomalias por z-score |
 | `netgene-policy` | Catálogo de ações, motor de políticas e log de auditoria assinado |
+| `netgene-presence` | Confirmação com hardware (Windows Hello) |
 | `netgene-cli` | Binário `netgene` |
 
 ```bash

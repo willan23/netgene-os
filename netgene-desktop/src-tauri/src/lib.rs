@@ -1,5 +1,6 @@
 use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel, marketplace::{Marketplace, AgentManifest}};
 use netgene_policy::{AuditEntry, Policy};
+use netgene_presence::PresenceEnrollment;
 use netgene_store::{NetGeneStore, models::{StoredEvent, StoredNode}};
 use netgene_llm::OllamaClient;
 use netgene_vault::{NetGeneVault, VaultFile};
@@ -40,15 +41,30 @@ async fn dispatch_intent(
     Ok(outcome)
 }
 
-/// Operator approval of an action held for confirmation.
+/// Operator approval of an action held for confirmation. When the policy
+/// requires user presence, Windows Hello is asked to sign the proposal.
 #[tauri::command]
 async fn confirm_intent(
     proposal_id: Uuid,
     store: State<'_, NetGeneStore>,
     kernel: State<'_, Arc<NetSphereKernel>>,
+    presence: State<'_, Option<PresenceEnrollment>>,
     app: AppHandle
 ) -> Result<DispatchOutcome, String> {
-    let outcome = kernel.confirm(proposal_id).await.map_err(|e| e.to_string())?;
+    let outcome = if kernel.requires_user_presence() {
+        let enrollment = presence
+            .inner()
+            .clone()
+            .ok_or("Policy requires user presence: run `netgene gene enroll-presence --gene <master-id>` first")?;
+        let challenge = kernel.presence_challenge(proposal_id).await.map_err(|e| e.to_string())?;
+        let signature = tauri::async_runtime::spawn_blocking(move || netgene_presence::sign(&enrollment, &challenge))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        kernel.confirm_with_presence(proposal_id, &signature).await.map_err(|e| e.to_string())?
+    } else {
+        kernel.confirm(proposal_id).await.map_err(|e| e.to_string())?
+    };
     record_event(&store, &app, "IntentConfirmed", outcome.summary());
     Ok(outcome)
 }
@@ -66,7 +82,8 @@ async fn get_audit_log(limit: usize, kernel: State<'_, Arc<NetSphereKernel>>) ->
 }
 
 /// The first Master Gene whose key is in the OS keystore, else a throw-away one.
-fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<KernelConfig> {
+/// Also returns the operator's presence enrolment, if any.
+fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<(KernelConfig, Option<PresenceEnrollment>)> {
     let policy = Policy::load_or_default(&netgene_dir.join("policy.json"))?;
     let audit_path = Some(netgene_dir.join("audit.jsonl"));
     let gene_dir = default_gene_dir();
@@ -76,8 +93,12 @@ fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<KernelConfig> 
         .find_map(|g| load_gene(&g.id.to_string(), &gene_dir, &OsKeyring::new()).ok());
 
     Ok(match master {
-        Some((operator, operator_kp)) => KernelConfig { operator, operator_kp, policy, audit_path },
-        None => KernelConfig { policy, audit_path, ..KernelConfig::ephemeral()? },
+        Some((operator, operator_kp)) => {
+            let enrollment = PresenceEnrollment::load(&netgene_dir.join("presence"), operator.id)?;
+            let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
+            (KernelConfig { operator, operator_kp, policy, audit_path, grants: vec![], presence_key }, enrollment)
+        }
+        None => (KernelConfig { policy, audit_path, ..KernelConfig::ephemeral()? }, None),
     })
 }
 
@@ -249,7 +270,8 @@ pub fn run() {
 
             // Boot the kernel once, acting as the local Master Gene when one exists.
             let netgene_dir = app.path().home_dir()?.join(".netgene");
-            let config = kernel_config(&netgene_dir).expect("Failed to load kernel configuration");
+            let (config, presence) = kernel_config(&netgene_dir).expect("Failed to load kernel configuration");
+            app.manage(presence);
             let kernel = tauri::async_runtime::block_on(async {
                 NetSphereKernel::boot_with(config).await.expect("Failed to boot NetSphereKernel")
             });

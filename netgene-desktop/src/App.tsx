@@ -81,7 +81,7 @@ function App() {
         <header className="flex justify-between items-center border-b border-cyan-neon/20 pb-4 mb-6">
           <div>
             <h1 className="text-3xl font-bold tracking-wider uppercase text-shadow-neon">NETGENE OS</h1>
-            <p className="text-xs font-mono opacity-60">v0.5.0 alpha // Desktop</p>
+            <p className="text-xs font-mono opacity-60">v0.6.0 alpha // Desktop</p>
           </div>
         </header>
 

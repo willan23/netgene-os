@@ -2954,7 +2954,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "netgene-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2966,6 +2966,7 @@ dependencies = [
  "netgene-llm",
  "netgene-p2p",
  "netgene-policy",
+ "netgene-presence",
  "netgene-store",
  "netgene-vault",
  "netgene-wasm",
@@ -2980,7 +2981,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3002,16 +3003,17 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
  "chrono",
  "netgene-gene",
  "netgene-llm",
  "netgene-policy",
+ "netgene-presence",
  "netgene-store",
+ "ring",
  "serde",
  "serde_json",
  "tempfile",
@@ -3023,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3036,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-p2p"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3052,10 +3054,9 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "chrono",
  "hex",
  "netgene-gene",
@@ -3068,8 +3069,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "netgene-presence"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha3",
+ "tempfile",
+ "uuid",
+ "windows",
+ "windows-future",
+]
+
+[[package]]
 name = "netgene-safeguard"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3083,7 +3101,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-store"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3118,7 +3136,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-wasm"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

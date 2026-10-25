@@ -1,4 +1,4 @@
-# Arquitetura do NetGene OS (v0.5.0)
+# Arquitetura do NetGene OS (v0.6.0)
 
 ## Camadas
 
@@ -48,7 +48,10 @@
 | `~/.netgene/genes/` | `<id>.gene.json` (identidade pública) |
 | Cofre do SO, serviço `netgene-os` | `gene:<id>` (PKCS#8 Ed25519), `gene-pq:<id>` (semente ML-DSA-65) e `vault:<fp>` (chave AES do vault) |
 | `~/.netgene/policy.json` | Política (opcional; sem ela vale a padrão: leituras permitidas, escritas com confirmação) |
-| `~/.netgene/audit.jsonl` | Log de auditoria encadeado e assinado |
+| `~/.netgene/audit.jsonl` | Log de auditoria encadeado e com assinatura híbrida |
+| `~/.netgene/tokens/` | Capability tokens (`<token_id>.json`) |
+| `~/.netgene/revoked-tokens.json` | Ids de tokens revogados |
+| `~/.netgene/presence/` | Chave pública do Windows Hello por Gene (a privada fica no TPM) |
 | `~/.netgene/db/` | Banco sled (nós, eventos, memória de agentes) |
 | `~/.netgene/vault/` | Chunks cifrados (formato v1) e `.meta` |
 | `~/.netgene/marketplace/` | Manifestos de agentes assinados |

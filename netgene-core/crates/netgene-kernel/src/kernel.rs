@@ -19,7 +19,7 @@ use crate::agent::{
 use crate::bus::MessageBus;
 use netgene_gene::{crypto::GeneKeyPair, NetGene};
 use netgene_llm::{LlmIntentEngine, OllamaClient};
-use netgene_policy::{Action, AuditEntry, AuditLog, AuditRecord, Decision, Policy, PolicyEngine};
+use netgene_policy::{Action, AuditEntry, AuditLog, AuditRecord, Decision, Grant, Policy, PolicyEngine};
 use crate::memory::KernelMemory;
 
 /// Who the kernel acts as, which policy it enforces and where it audits.
@@ -30,13 +30,17 @@ pub struct KernelConfig {
     pub policy: Policy,
     /// `None` keeps the audit log in memory.
     pub audit_path: Option<PathBuf>,
+    /// Capabilities from verified capability tokens held by the operator.
+    pub grants: Vec<Grant>,
+    /// Enrolled hardware user-presence key (PKCS#1 RSA public key), if any.
+    pub presence_key: Option<Vec<u8>>,
 }
 
 impl KernelConfig {
     /// Throw-away Master Gene, default policy, in-memory audit (tests, demos).
     pub fn ephemeral() -> Result<Self> {
         let (operator, operator_kp) = NetGene::generate_master("ephemeral-operator")?;
-        Ok(Self { operator, operator_kp, policy: Policy::default(), audit_path: None })
+        Ok(Self { operator, operator_kp, policy: Policy::default(), audit_path: None, grants: vec![], presence_key: None })
     }
 }
 
@@ -75,6 +79,8 @@ pub struct NetSphereKernel {
     audit: Mutex<AuditLog>,
     /// Actions waiting for human confirmation: id → (original input, action).
     pending: Mutex<HashMap<Uuid, (String, Action)>>,
+    grants: Vec<Grant>,
+    presence_key: Option<Vec<u8>>,
     /// Running agent task handles.
     _task_handles: Vec<JoinHandle<()>>,
 }
@@ -168,6 +174,8 @@ impl NetSphereKernel {
             policy: PolicyEngine::new(config.policy),
             audit: Mutex::new(audit),
             pending: Mutex::new(HashMap::new()),
+            grants: config.grants,
+            presence_key: config.presence_key,
             _task_handles: handles,
         })
     }
@@ -200,7 +208,7 @@ impl NetSphereKernel {
             return Ok(DispatchOutcome::Denied { action: None, reason, explanation });
         };
 
-        match self.policy.evaluate(&self.operator, &action) {
+        match self.evaluate(&action) {
             Decision::Allow => {
                 self.audit(input, Some(&action), "allow", "").await?;
                 self.execute(input, &action).await?;
@@ -219,8 +227,48 @@ impl NetSphereKernel {
         }
     }
 
-    /// Human approval of a pending proposal.
+    /// Whether confirmations need a hardware user-presence proof.
+    pub fn requires_user_presence(&self) -> bool {
+        self.policy.policy().require_user_presence
+    }
+
+    /// Bytes the operator's presence key must sign to approve `proposal_id`.
+    pub async fn presence_challenge(&self, proposal_id: Uuid) -> Result<Vec<u8>> {
+        let pending = self.pending.lock().await;
+        let (_, action) = pending
+            .get(&proposal_id)
+            .ok_or_else(|| anyhow::anyhow!("No pending proposal {}", proposal_id))?;
+        netgene_presence::challenge(proposal_id, &action.kind, &action.params)
+    }
+
+    /// Human approval of a pending proposal (when the policy does not require
+    /// a user-presence proof).
     pub async fn confirm(&self, proposal_id: Uuid) -> Result<DispatchOutcome> {
+        if self.requires_user_presence() {
+            anyhow::bail!("Policy requires a user-presence proof to confirm (use confirm_with_presence)");
+        }
+        self.confirm_inner(proposal_id, format!("proposal {}", proposal_id)).await
+    }
+
+    /// Human approval backed by a hardware user-presence signature over
+    /// [`Self::presence_challenge`].
+    pub async fn confirm_with_presence(&self, proposal_id: Uuid, signature: &[u8]) -> Result<DispatchOutcome> {
+        let key = self
+            .presence_key
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("No user-presence key enrolled for the operator"))?;
+        let challenge = self.presence_challenge(proposal_id).await?;
+        if !netgene_presence::verify(key, &challenge, signature) {
+            let pending = self.pending.lock().await;
+            if let Some((input, action)) = pending.get(&proposal_id) {
+                self.audit(input, Some(action), "presence_failed", &format!("proposal {}", proposal_id)).await?;
+            }
+            anyhow::bail!("User-presence signature is invalid for proposal {}", proposal_id);
+        }
+        self.confirm_inner(proposal_id, format!("proposal {} (user presence verified)", proposal_id)).await
+    }
+
+    async fn confirm_inner(&self, proposal_id: Uuid, detail: String) -> Result<DispatchOutcome> {
         let (input, action) = self
             .pending
             .lock()
@@ -229,12 +277,12 @@ impl NetSphereKernel {
             .ok_or_else(|| anyhow::anyhow!("No pending proposal {}", proposal_id))?;
 
         // Re-check: the operator could have been suspended since the proposal.
-        if let Decision::Deny { reason } = self.policy.evaluate(&self.operator, &action) {
+        if let Decision::Deny { reason } = self.evaluate(&action) {
             self.audit(&input, Some(&action), "deny", &reason).await?;
             return Ok(DispatchOutcome::Denied { action: Some(action), reason, explanation: String::new() });
         }
 
-        self.audit(&input, Some(&action), "confirmed", &format!("proposal {}", proposal_id)).await?;
+        self.audit(&input, Some(&action), "confirmed", &detail).await?;
         self.execute(&input, &action).await?;
         Ok(DispatchOutcome::Executed { action, explanation: "confirmed by operator".to_string() })
     }
@@ -249,6 +297,18 @@ impl NetSphereKernel {
             .ok_or_else(|| anyhow::anyhow!("No pending proposal {}", proposal_id))?;
         self.audit(&input, Some(&action), "rejected", &format!("proposal {}", proposal_id)).await?;
         Ok(())
+    }
+
+    /// Policy decision for the operator, counting only unexpired grants.
+    fn evaluate(&self, action: &Action) -> Decision {
+        let now = chrono::Utc::now();
+        let granted: Vec<String> = self
+            .grants
+            .iter()
+            .filter(|g| g.is_active(now))
+            .flat_map(|g| g.capabilities.iter().cloned())
+            .collect();
+        self.policy.evaluate_with_grants(&self.operator, &granted, action)
     }
 
     /// Compatibility wrapper returning a human-readable summary.

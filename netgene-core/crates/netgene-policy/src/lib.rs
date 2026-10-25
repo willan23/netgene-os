@@ -15,5 +15,5 @@ pub mod engine;
 pub mod audit;
 
 pub use action::{Action, ActionSpec, Risk, ACTION_CATALOG};
-pub use engine::{Decision, Effect, Policy, PolicyEngine, Rule};
+pub use engine::{Decision, Effect, Grant, Policy, PolicyEngine, Rule};
 pub use audit::{AuditEntry, AuditLog, AuditRecord};

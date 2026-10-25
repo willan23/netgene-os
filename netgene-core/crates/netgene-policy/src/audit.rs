@@ -1,18 +1,20 @@
 //! Append-only, hash-chained, signed audit log (JSON Lines).
 //!
-//! Each entry stores the SHA3-256 hash of the previous entry and an Ed25519
-//! signature (by the kernel's operator Gene) over its own hash. Editing,
-//! deleting or reordering any line breaks verification of every later line.
+//! Each entry stores the SHA3-256 hash of the previous entry and a hybrid
+//! (Ed25519 + ML-DSA-65) signature by the kernel's operator Gene over its own
+//! hash. Editing, deleting or reordering any line breaks verification of
+//! every later line.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use netgene_gene::crypto::{verify_signature, GeneKeyPair};
+use tracing::warn;
+use netgene_gene::crypto::GeneKeyPair;
+use netgene_gene::{verify_hybrid, HybridPublicKey, HybridSignature};
 
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -35,7 +37,7 @@ struct AuditBody<'a> {
     seq: u64,
     timestamp: &'a DateTime<Utc>,
     record: &'a AuditRecord,
-    signer_public_key_b64: &'a str,
+    signer: &'a HybridPublicKey,
     prev_hash: &'a str,
 }
 
@@ -44,10 +46,10 @@ pub struct AuditEntry {
     pub seq: u64,
     pub timestamp: DateTime<Utc>,
     pub record: AuditRecord,
-    pub signer_public_key_b64: String,
+    pub signer: HybridPublicKey,
     pub prev_hash: String,
     pub hash: String,
-    pub signature_b64: String,
+    pub signature: HybridSignature,
 }
 
 impl AuditEntry {
@@ -56,7 +58,7 @@ impl AuditEntry {
             seq: self.seq,
             timestamp: &self.timestamp,
             record: &self.record,
-            signer_public_key_b64: &self.signer_public_key_b64,
+            signer: &self.signer,
             prev_hash: &self.prev_hash,
         };
         Ok(hex::encode(Sha3_256::digest(serde_json::to_vec(&body)?)))
@@ -73,9 +75,17 @@ pub struct AuditLog {
 
 impl AuditLog {
     /// Open (or create) a log file and continue its chain.
+    ///
+    /// A log written by NetGene 0.5 (Ed25519-only entry format) is moved
+    /// aside to `<name>.v1` untouched, and a new chain is started.
     pub fn open(path: PathBuf, signer: GeneKeyPair) -> Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
+        }
+        if path.exists() && Self::is_legacy_format(&path)? {
+            let archived = path.with_extension("jsonl.v1");
+            fs::rename(&path, &archived)?;
+            warn!("Archived NetGene 0.5 audit log to {:?}; starting a new hybrid-signed chain", archived);
         }
         let entries = if path.exists() { Self::read_entries(&path)? } else { vec![] };
         verify_chain(&entries).with_context(|| format!("Audit log {} failed verification", path.display()))?;
@@ -85,6 +95,14 @@ impl AuditLog {
             None => (0, GENESIS_HASH.to_string()),
         };
         Ok(Self { path: Some(path), signer, next_seq, last_hash, memory: vec![] })
+    }
+
+    fn is_legacy_format(path: &Path) -> Result<bool> {
+        let text = fs::read_to_string(path)?;
+        let Some(first) = text.lines().find(|l| !l.trim().is_empty()) else { return Ok(false) };
+        Ok(serde_json::from_str::<serde_json::Value>(first)
+            .map(|v| v.get("signer_public_key_b64").is_some() && v.get("signer").is_none())
+            .unwrap_or(false))
     }
 
     /// Log kept only in memory (tests, ephemeral kernels).
@@ -97,13 +115,13 @@ impl AuditLog {
             seq: self.next_seq,
             timestamp: Utc::now(),
             record,
-            signer_public_key_b64: self.signer.public_key_b64(),
+            signer: self.signer.hybrid_public_key(),
             prev_hash: self.last_hash.clone(),
             hash: String::new(),
-            signature_b64: String::new(),
+            signature: HybridSignature { ed25519_b64: String::new(), ml_dsa65_b64: None },
         };
         entry.hash = entry.compute_hash()?;
-        entry.signature_b64 = BASE64.encode(self.signer.sign(entry.hash.as_bytes())?);
+        entry.signature = self.signer.sign_hybrid(entry.hash.as_bytes())?;
 
         match &self.path {
             Some(path) => {
@@ -157,9 +175,7 @@ pub fn verify_chain(entries: &[AuditEntry]) -> Result<()> {
         if entry.compute_hash()? != entry.hash {
             anyhow::bail!("entry {} was modified (hash mismatch)", entry.seq);
         }
-        let key = BASE64.decode(&entry.signer_public_key_b64)?;
-        let sig = BASE64.decode(&entry.signature_b64)?;
-        if !verify_signature(&key, entry.hash.as_bytes(), &sig) {
+        if !verify_hybrid(&entry.signer, entry.hash.as_bytes(), &entry.signature) {
             anyhow::bail!("entry {} has an invalid signature", entry.seq);
         }
         prev = entry.hash.clone();
@@ -224,6 +240,29 @@ mod tests {
 
         // A tampered log refuses to be extended.
         assert!(AuditLog::open(path, signer()).is_err());
+    }
+
+    #[test]
+    fn test_entries_are_post_quantum_signed() {
+        let mut log = AuditLog::in_memory(signer());
+        let mut entry = log.append(record(1)).unwrap();
+        assert!(entry.signer.is_post_quantum());
+        verify_chain(std::slice::from_ref(&entry)).unwrap();
+
+        entry.signature.ml_dsa65_b64 = None;
+        assert!(verify_chain(&[entry]).is_err());
+    }
+
+    #[test]
+    fn test_legacy_log_is_archived() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        fs::write(&path, "{\"seq\":0,\"signer_public_key_b64\":\"x\",\"signature_b64\":\"y\"}\n").unwrap();
+
+        let mut log = AuditLog::open(path.clone(), signer()).unwrap();
+        log.append(record(1)).unwrap();
+        assert!(dir.path().join("audit.jsonl.v1").exists());
+        assert_eq!(AuditLog::verify_file(&path).unwrap(), 1);
     }
 
     #[test]
