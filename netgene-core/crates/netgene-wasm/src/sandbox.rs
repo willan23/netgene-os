@@ -19,6 +19,10 @@
 //!
 //! There is no WASI, no filesystem and no network. Execution is bounded by
 //! fuel (CPU), a memory limit and per-permission quotas.
+//!
+//! A module may also be a **component** of the `netgene:agent` world
+//! (`wit/agent.wit`), with one WIT interface per permission; see
+//! [`crate::component`]. The kind is detected from the signed bytes.
 
 use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
@@ -37,12 +41,12 @@ const WASM_MAGIC: [u8; 4] = [0x00, 0x61, 0x73, 0x6d];
 const SIGNING_DOMAIN: &[u8] = b"netgene-wasm-module-v3\0";
 const HOST_NAMESPACE: &str = "netgene";
 
-const MAX_LOG_ENTRIES: usize = 100;
-const MAX_LOG_BYTES: usize = 1024;
-const MAX_OUTPUT_BYTES: usize = 64 * 1024;
-const MAX_KV_KEYS: usize = 256;
-const MAX_KV_KEY_BYTES: usize = 256;
-const MAX_KV_VALUE_BYTES: usize = 4 * 1024;
+pub(crate) const MAX_LOG_ENTRIES: usize = 100;
+pub(crate) const MAX_LOG_BYTES: usize = 1024;
+pub(crate) const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_KV_KEYS: usize = 256;
+pub(crate) const MAX_KV_KEY_BYTES: usize = 256;
+pub(crate) const MAX_KV_VALUE_BYTES: usize = 4 * 1024;
 
 /// Default CPU budget for one execution.
 pub const DEFAULT_FUEL: u64 = 10_000_000;
@@ -339,6 +343,22 @@ impl WasmSandbox {
         let mut config = Config::new();
         config.consume_fuel(true);
         let engine = Engine::new(&config).map_err(|e| anyhow::anyhow!("Failed to init wasmtime: {}", e))?;
+
+        if crate::component::is_component(&wasm_bytes) {
+            let start = std::time::Instant::now();
+            let run = crate::component::run(&engine, &wasm_bytes, &granted, self.memory_limit_bytes, self.fuel, input.input, input.kv)?;
+            info!("✅ WASM component '{}' returned {}", module.name, run.return_value);
+            return Ok(ExecutionResult {
+                module_id: module.module_id,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+                fuel_consumed: self.fuel.saturating_sub(run.fuel_remaining),
+                return_value: run.return_value,
+                output: run.state.output,
+                logs: run.state.logs,
+                kv: run.state.kv,
+            });
+        }
+
         let compiled = Module::new(&engine, &wasm_bytes).map_err(|e| anyhow::anyhow!("WASM compilation failed: {}", e))?;
 
         for import in compiled.imports() {

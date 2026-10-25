@@ -1,0 +1,44 @@
+/// Contract between NetGene and a WebAssembly component agent.
+///
+/// Each interface is one sandbox permission. A component may only import the
+/// interfaces whose permission it declared in its signed Gene Module and that
+/// the sandbox grants; there is no WASI, no filesystem and no network.
+///
+/// Build a guest with any Component Model toolchain (e.g. `wit-bindgen` +
+/// `wasm-tools component new`, `cargo component`, `componentize-py`), then sign
+/// it with `netgene wasm sign --permissions …`.
+package netgene:agent@0.1.0;
+
+/// Permission `log`: up to 100 messages of at most 1 KiB.
+interface log {
+  log: func(message: string);
+}
+
+/// Permission `io`: read the run's input, append to its output (64 KiB max).
+interface io {
+  input: func() -> list<u8>;
+  /// Returns false (and appends nothing) once the output quota would be exceeded.
+  output: func(data: list<u8>) -> bool;
+}
+
+/// Permission `kv`: the agent's key-value state, kept between runs by the kernel.
+interface kv {
+  get: func(key: string) -> option<list<u8>>;
+  /// Returns false when the key would exceed the quota (256 keys, 4 KiB values).
+  set: func(key: string, value: list<u8>) -> bool;
+}
+
+/// Permission `clock`: wall-clock time.
+interface clock {
+  now-ms: func() -> s64;
+}
+
+world agent {
+  import log;
+  import io;
+  import kv;
+  import clock;
+
+  /// Entry point; the returned value is reported as `return_value`.
+  export run: func() -> s32;
+}
