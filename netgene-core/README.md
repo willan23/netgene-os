@@ -4,7 +4,7 @@ Workspace Rust do NetGene OS. A visão geral, o estado de cada módulo e o roadm
 
 | Crate | Função |
 |---|---|
-| `netgene-gene` | Identidade Ed25519, linhagem assinada, cofre de segredos |
+| `netgene-gene` | Identidade híbrida Ed25519 + ML-DSA-65, linhagem assinada, cofre de segredos |
 | `netgene-kernel` | Agentes, barramento de mensagens, intents e marketplace local |
 | `netgene-llm` | Cliente Ollama e parser de intenções |
 | `netgene-p2p` | Nó libp2p (Noise, Yamux, Gossipsub, mDNS, Kademlia) |
@@ -12,6 +12,7 @@ Workspace Rust do NetGene OS. A visão geral, o estado de cada módulo e o roadm
 | `netgene-vault` | Cofre local AES-256-GCM, chave no cofre do sistema |
 | `netgene-wasm` | Sandbox de módulos WASM assinados |
 | `netgene-safeguard` | Detecção de anomalias por z-score |
+| `netgene-policy` | Catálogo de ações, motor de políticas e log de auditoria assinado |
 | `netgene-cli` | Binário `netgene` |
 
 ```bash

@@ -12,16 +12,21 @@ use zeroize::Zeroizing;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-/// A generated Ed25519 keypair.
+use crate::pq::PqKeyPair;
+
+/// A Gene key pair: Ed25519, plus an optional ML-DSA-65 key for hybrid
+/// (post-quantum) signatures.
 pub struct GeneKeyPair {
     /// PKCS#8 encoded private key bytes (zeroized on drop)
     pkcs8: Zeroizing<Vec<u8>>,
     /// Public key bytes
     pub_key: Vec<u8>,
+    /// Post-quantum key (absent on genes created before v0.5).
+    pq: Option<PqKeyPair>,
 }
 
 impl GeneKeyPair {
-    /// Generate a new random Ed25519 keypair.
+    /// Generate a new random hybrid (Ed25519 + ML-DSA-65) keypair.
     pub fn generate() -> Result<Self> {
         let rng = SystemRandom::new();
         let pkcs8 = Ed25519KeyPair::generate_pkcs8(&rng)
@@ -35,10 +40,11 @@ impl GeneKeyPair {
         Ok(Self {
             pkcs8: Zeroizing::new(pkcs8.as_ref().to_vec()),
             pub_key,
+            pq: Some(PqKeyPair::generate()?),
         })
     }
 
-    /// Load from existing PKCS#8 bytes.
+    /// Load from existing PKCS#8 bytes (Ed25519 only; see [`Self::with_pq_seed`]).
     pub fn from_pkcs8(bytes: Vec<u8>) -> Result<Self> {
         let pair = Ed25519KeyPair::from_pkcs8(&bytes)
             .map_err(|_| anyhow::anyhow!("Invalid PKCS8 key"))?;
@@ -46,7 +52,24 @@ impl GeneKeyPair {
         Ok(Self {
             pkcs8: Zeroizing::new(bytes),
             pub_key,
+            pq: None,
         })
+    }
+
+    /// Attach the ML-DSA-65 key derived from `seed`.
+    pub fn with_pq_seed(mut self, seed: &[u8]) -> Result<Self> {
+        self.pq = Some(PqKeyPair::from_seed(seed)?);
+        Ok(self)
+    }
+
+    /// The post-quantum half, if any.
+    pub fn pq(&self) -> Option<&PqKeyPair> {
+        self.pq.as_ref()
+    }
+
+    /// Base64 ML-DSA-65 public key, if any.
+    pub fn pq_public_key_b64(&self) -> Option<String> {
+        self.pq.as_ref().map(|pq| BASE64.encode(pq.public_key_bytes()))
     }
 
     /// Sign a message, returning signature bytes.

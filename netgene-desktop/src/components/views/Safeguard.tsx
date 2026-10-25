@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useStore } from '../../store';
 import { ShieldAlert, AlertTriangle, Activity, Lock, RefreshCw, Zap } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { dispatchWithConfirmation } from '../../intents';
 
 export function Safeguard() {
   const { safeguard, setSafeguard } = useStore();
@@ -25,7 +26,7 @@ export function Safeguard() {
   const handleSimulateAnomaly = async () => {
     setLoading(true);
     try {
-      await invoke('dispatch_intent', { intent: 'trigger anomaly scan' });
+      await dispatchWithConfirmation('trigger anomaly scan');
       await fetchSafeguard();
     } catch (err) {
       console.error(err);
@@ -37,7 +38,7 @@ export function Safeguard() {
   const handleSelfHeal = async () => {
     setLoading(true);
     try {
-      await invoke('dispatch_intent', { intent: 'optimize network routes and heal anomaly' });
+      await dispatchWithConfirmation('optimize network routes and heal anomaly');
       await fetchSafeguard();
     } catch (err) {
       console.error(err);

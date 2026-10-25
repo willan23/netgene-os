@@ -3,20 +3,64 @@
 //! Spawns and manages agents, routes intents, and maintains kernel state.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 use anyhow::Result;
+use serde::Serialize;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 use crate::agent::{
     Agent, AgentId, AgentInfo, AgentMessage, MessageKind,
     BuilderAgent, MonitorAgent, OptimizerAgent, NetworkAgent, EvolutionAgent,
 };
 use crate::bus::MessageBus;
-use crate::intent::{IntentAction, IntentParser};
+use netgene_gene::{crypto::GeneKeyPair, NetGene};
 use netgene_llm::{LlmIntentEngine, OllamaClient};
+use netgene_policy::{Action, AuditEntry, AuditLog, AuditRecord, Decision, Policy, PolicyEngine};
 use crate::memory::KernelMemory;
+
+/// Who the kernel acts as, which policy it enforces and where it audits.
+pub struct KernelConfig {
+    /// Gene on whose behalf intents are evaluated; its key signs the audit log.
+    pub operator: NetGene,
+    pub operator_kp: GeneKeyPair,
+    pub policy: Policy,
+    /// `None` keeps the audit log in memory.
+    pub audit_path: Option<PathBuf>,
+}
+
+impl KernelConfig {
+    /// Throw-away Master Gene, default policy, in-memory audit (tests, demos).
+    pub fn ephemeral() -> Result<Self> {
+        let (operator, operator_kp) = NetGene::generate_master("ephemeral-operator")?;
+        Ok(Self { operator, operator_kp, policy: Policy::default(), audit_path: None })
+    }
+}
+
+/// Result of submitting an intent.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum DispatchOutcome {
+    Executed { action: Action, explanation: String },
+    PendingConfirmation { proposal_id: Uuid, action: Action, reason: String, explanation: String },
+    Denied { action: Option<Action>, reason: String, explanation: String },
+}
+
+impl DispatchOutcome {
+    /// One-line human summary.
+    pub fn summary(&self) -> String {
+        match self {
+            DispatchOutcome::Executed { action, explanation } =>
+                format!("✅ Action dispatched: {}\n🧠 {}", action.kind, explanation),
+            DispatchOutcome::PendingConfirmation { proposal_id, action, reason, .. } =>
+                format!("⏸️ Confirmation required for {} ({}). Proposal: {}", action.kind, reason, proposal_id),
+            DispatchOutcome::Denied { reason, .. } => format!("⛔ Denied by policy: {}", reason),
+        }
+    }
+}
 
 /// The Netsphere Kernel state.
 pub struct NetSphereKernel {
@@ -26,14 +70,28 @@ pub struct NetSphereKernel {
     agents: Arc<Mutex<HashMap<AgentId, AgentInfo>>>,
     /// Kernel memory.
     pub memory: Arc<Mutex<KernelMemory>>,
+    operator: NetGene,
+    policy: PolicyEngine,
+    audit: Mutex<AuditLog>,
+    /// Actions waiting for human confirmation: id → (original input, action).
+    pending: Mutex<HashMap<Uuid, (String, Action)>>,
     /// Running agent task handles.
     _task_handles: Vec<JoinHandle<()>>,
 }
 
 impl NetSphereKernel {
-    /// Boot the kernel: create agents, wire the bus, start tasks.
+    /// Boot with an ephemeral operator and the default policy.
     pub async fn boot() -> Result<Self> {
+        Self::boot_with(KernelConfig::ephemeral()?).await
+    }
+
+    /// Boot the kernel: create agents, wire the bus, start tasks.
+    pub async fn boot_with(config: KernelConfig) -> Result<Self> {
         info!("🧬 Netsphere Kernel booting (5 core agents)...");
+        let audit = match config.audit_path {
+            Some(path) => AuditLog::open(path, config.operator_kp)?,
+            None => AuditLog::in_memory(config.operator_kp),
+        };
 
         let mut bus = MessageBus::new();
         let agents_map: Arc<Mutex<HashMap<AgentId, AgentInfo>>> =
@@ -106,72 +164,139 @@ impl NetSphereKernel {
             bus_tx,
             agents: agents_map,
             memory,
+            operator: config.operator,
+            policy: PolicyEngine::new(config.policy),
+            audit: Mutex::new(audit),
+            pending: Mutex::new(HashMap::new()),
             _task_handles: handles,
         })
     }
 
-    /// Parse and dispatch a natural language intent to the appropriate agent using BDI / Ollama.
-    pub async fn dispatch_intent(&self, input: &str) -> Result<String> {
+    /// Submit a natural-language intent. The LLM (or the rule-based fallback)
+    /// only *proposes* an action; the policy engine decides whether it runs
+    /// now, waits for confirmation, or is denied. Every step is audited.
+    pub async fn propose_intent(&self, input: &str) -> Result<DispatchOutcome> {
         let client = OllamaClient::new(Some("http://localhost:11434"), Some("llama3"));
         let engine = LlmIntentEngine::new(client);
 
-        info!("Enviando intent para o LLM Engine: {}", input);
-        
         let llm_intent = engine.parse(input).await.unwrap_or_else(|e| {
-            warn!("LLM Parse failed: {}. Usando fallback.", e);
+            warn!("LLM parse failed: {}", e);
             netgene_llm::LlmParsedIntent {
                 action: "unknown".to_string(),
                 parameters: serde_json::json!({}),
-                explanation: format!("Erro LLM: {}", e),
+                explanation: format!("LLM error: {}", e),
             }
         });
+        let explanation = llm_intent.explanation.clone();
 
-        // Log to memory
         {
             let mut mem = self.memory.lock().await;
-            mem.log_event(format!("BDI Intent: {} (Action: {})", input, llm_intent.action));
+            mem.log_event(format!("Intent: {} (proposed: {})", input, llm_intent.action));
         }
 
-        let msg = match llm_intent.action.as_str() {
-            "provision_nodes" => {
-                let count = llm_intent.parameters.get("count").and_then(|c| c.as_u64()).unwrap_or(1);
-                AgentMessage::new(
-                    None, None, MessageKind::Intent,
-                    serde_json::json!({ "action": "spawn_node", "count": count }),
-                )
-            }
-            "optimize_network" => {
-                AgentMessage::new(
-                    None, None, MessageKind::Intent,
-                    serde_json::json!({ "action": "optimize_routes" }),
-                )
-            }
-            "system_status" => {
-                AgentMessage::new(None, None, MessageKind::Heartbeat, serde_json::json!({}))
-            }
-            "trigger_anomaly_scan" => {
-                AgentMessage::new(
-                    None, None, MessageKind::Alert,
-                    serde_json::json!({ "message": "Self-heal requested by operator" }),
-                )
-            }
-            _ => {
-                let fallback = IntentParser::parse(input);
-                if let IntentAction::Unknown { raw } = fallback.action {
-                     return Ok(format!("⚠️ Intent not recognized by BDI: '{}'\nLLM Output: {}", raw, llm_intent.explanation));
-                } else {
-                     return Ok(format!("✅ Intent dispatched by Fallback: {:?}\nBDI Explanation: {}", fallback.action, llm_intent.explanation));
-                }
-            }
+        let Some(action) = Action::from_llm_intent(&llm_intent.action, llm_intent.parameters.clone()) else {
+            let reason = format!("'{}' is not an executable action", llm_intent.action);
+            self.audit(input, None, "deny", &reason).await?;
+            return Ok(DispatchOutcome::Denied { action: None, reason, explanation });
         };
 
+        match self.policy.evaluate(&self.operator, &action) {
+            Decision::Allow => {
+                self.audit(input, Some(&action), "allow", "").await?;
+                self.execute(input, &action).await?;
+                Ok(DispatchOutcome::Executed { action, explanation })
+            }
+            Decision::Confirm { reason } => {
+                self.audit(input, Some(&action), "confirm", &reason).await?;
+                let proposal_id = Uuid::new_v4();
+                self.pending.lock().await.insert(proposal_id, (input.to_string(), action.clone()));
+                Ok(DispatchOutcome::PendingConfirmation { proposal_id, action, reason, explanation })
+            }
+            Decision::Deny { reason } => {
+                self.audit(input, Some(&action), "deny", &reason).await?;
+                Ok(DispatchOutcome::Denied { action: Some(action), reason, explanation })
+            }
+        }
+    }
+
+    /// Human approval of a pending proposal.
+    pub async fn confirm(&self, proposal_id: Uuid) -> Result<DispatchOutcome> {
+        let (input, action) = self
+            .pending
+            .lock()
+            .await
+            .remove(&proposal_id)
+            .ok_or_else(|| anyhow::anyhow!("No pending proposal {}", proposal_id))?;
+
+        // Re-check: the operator could have been suspended since the proposal.
+        if let Decision::Deny { reason } = self.policy.evaluate(&self.operator, &action) {
+            self.audit(&input, Some(&action), "deny", &reason).await?;
+            return Ok(DispatchOutcome::Denied { action: Some(action), reason, explanation: String::new() });
+        }
+
+        self.audit(&input, Some(&action), "confirmed", &format!("proposal {}", proposal_id)).await?;
+        self.execute(&input, &action).await?;
+        Ok(DispatchOutcome::Executed { action, explanation: "confirmed by operator".to_string() })
+    }
+
+    /// Discard a pending proposal.
+    pub async fn reject(&self, proposal_id: Uuid) -> Result<()> {
+        let (input, action) = self
+            .pending
+            .lock()
+            .await
+            .remove(&proposal_id)
+            .ok_or_else(|| anyhow::anyhow!("No pending proposal {}", proposal_id))?;
+        self.audit(&input, Some(&action), "rejected", &format!("proposal {}", proposal_id)).await?;
+        Ok(())
+    }
+
+    /// Compatibility wrapper returning a human-readable summary.
+    pub async fn dispatch_intent(&self, input: &str) -> Result<String> {
+        Ok(self.propose_intent(input).await?.summary())
+    }
+
+    /// Entries of the audit log.
+    pub async fn audit_entries(&self) -> Result<Vec<AuditEntry>> {
+        self.audit.lock().await.entries()
+    }
+
+    /// The policy currently enforced.
+    pub fn policy(&self) -> &Policy {
+        self.policy.policy()
+    }
+
+    async fn audit(&self, input: &str, action: Option<&Action>, decision: &str, detail: &str) -> Result<()> {
+        self.audit.lock().await.append(AuditRecord {
+            actor_gene_id: self.operator.id.to_string(),
+            input: input.to_string(),
+            action: action.map(|a| a.kind.clone()),
+            params: action.map(|a| a.params.clone()).unwrap_or(serde_json::Value::Null),
+            decision: decision.to_string(),
+            detail: detail.to_string(),
+        })?;
+        Ok(())
+    }
+
+    /// Translate an approved catalog action into agent messages.
+    async fn execute(&self, input: &str, action: &Action) -> Result<()> {
+        let msg = match action.kind.as_str() {
+            "node.provision" => {
+                let count = action.params.get("count").and_then(|c| c.as_u64()).unwrap_or(1);
+                AgentMessage::new(None, None, MessageKind::Intent, serde_json::json!({ "action": "spawn_node", "count": count }))
+            }
+            "network.optimize" => {
+                AgentMessage::new(None, None, MessageKind::Intent, serde_json::json!({ "action": "optimize_routes" }))
+            }
+            "system.status" => AgentMessage::new(None, None, MessageKind::Heartbeat, serde_json::json!({})),
+            "safeguard.scan" => AgentMessage::new(
+                None, None, MessageKind::Alert,
+                serde_json::json!({ "message": "Anomaly scan requested by operator" }),
+            ),
+            other => anyhow::bail!("No executor for action '{}'", other),
+        };
         self.bus_tx.send(msg).await?;
-        
-        Ok(format!(
-            "🧠 BDI Reasoning: {}\n✅ Action dispatched: {}",
-            llm_intent.explanation,
-            llm_intent.action
-        ))
+        self.audit(input, Some(action), "executed", "").await
     }
 
     pub async fn dispatch_swarm_sync(&self) -> Result<usize> {

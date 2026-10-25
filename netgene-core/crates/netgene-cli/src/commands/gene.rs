@@ -72,14 +72,14 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
                 println!("║  Status:      {}", gene.status);
                 println!("║  Fingerprint: {}", gene.fingerprint);
                 println!("║  Short FP:    {}", gene.short_fp);
-                println!("║  Algorithm:   Ed25519");
+                println!("║  Algorithm:   {}", gene.algorithm);
                 println!("║  Capabilities:");
                 for cap in &gene.capabilities {
                     println!("║    • {}", cap);
                 }
                 println!("╠══════════════════════════════════════════════════════╣");
                 println!("║  ✅ Public identity: {}", dir.display());
-                println!("║  🔐 Private key:     OS keystore (service 'netgene-os')");
+                println!("║  🔐 Private keys:    OS keystore (service 'netgene-os')");
                 println!("╚══════════════════════════════════════════════════════╝");
             }
         }
