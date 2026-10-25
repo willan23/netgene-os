@@ -101,11 +101,20 @@ pub async fn run(cmd: AgentCommand, _json: bool) -> Result<()> {
                     })?;
                     let challenge = kernel.presence_challenge(*proposal_id).await?;
                     println!("🔐 Waiting for Windows Hello approval...");
-                    let signature = tokio::task::spawn_blocking({
+                    let signed = tokio::task::spawn_blocking({
                         let enrollment = enrollment.clone();
                         move || netgene_presence::sign(&enrollment, &challenge)
                     })
-                    .await??;
+                    .await?;
+                    let signature = match signed {
+                        Ok(signature) => signature,
+                        Err(e) => {
+                            // Cancelled or failed: record the rejection so the audit log shows it.
+                            kernel.reject(*proposal_id).await?;
+                            kernel.shutdown().await?;
+                            return Err(e);
+                        }
+                    };
                     outcome = kernel.confirm_with_presence(*proposal_id, &signature).await?;
                     println!("{}", outcome.summary());
                 } else if confirm {
