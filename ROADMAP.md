@@ -25,7 +25,8 @@ Base: [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md). Cada fase só começa quando
 - [ ] **Passkeys (adiado):** `webauthn-rs` exige uma origem HTTPS ou `localhost` no WebView do Tauri. Fica junto do motor de políticas na Fase 2 (a tela de bloqueio falsa já foi removida na Fase 0).
 - [x] **libp2p 0.54 → 0.57:** feito na v0.5.0. O `cargo audit` agora reporta 0 vulnerabilidades no core e no desktop.
 - [ ] **CI:** `cargo deny` e `clippy -D warnings`.
-- [ ] **Linux:** validar o build e o cofre (Secret Service) no Docker e no CI.
+- [x] **Linux/Docker:** build validado no WSL e no Docker. O fluxo do `deploy/docker-compose.yml` foi testado de ponta a ponta: `gene init` no volume, `secrets.enc` cifrado com permissão 0600, senha errada recusada, nó no ar com rootfs só leitura, sem capabilities e sem root.
+- [ ] **Linux:** testar o cofre Secret Service num desktop real e rodar o CI (bloqueado pela cobrança do GitHub Actions).
 
 ## Fase 2: Núcleo real ✅ (v0.5.0 – v0.7.0)
 

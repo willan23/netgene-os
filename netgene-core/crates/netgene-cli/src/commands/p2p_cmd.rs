@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 #[derive(Args)]
 pub struct NodeIdentity {
     /// Gene to run as (its key becomes the libp2p identity)
-    #[arg(long)]
+    #[arg(long, env = "NETGENE_GENE_ID")]
     gene: String,
     /// Accept any peer instead of only genes of the same lineage (development only)
     #[arg(long)]

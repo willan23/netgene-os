@@ -223,7 +223,19 @@ impl EncryptedFileStore {
             std::fs::create_dir_all(parent)?;
         }
         let tmp = self.path.with_extension("tmp");
-        std::fs::write(&tmp, serde_json::to_string_pretty(&doc)?)?;
+        let _ = std::fs::remove_file(&tmp);
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        // Owner-only: the ciphertext + salt would otherwise allow offline
+        // passphrase guessing by any local user.
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+        {
+            use std::io::Write;
+            let mut f = opts.open(&tmp)?;
+            f.write_all(serde_json::to_string_pretty(&doc)?.as_bytes())?;
+            f.sync_all()?;
+        }
         std::fs::rename(&tmp, &self.path)?;
         Ok(())
     }
@@ -340,6 +352,18 @@ mod tests {
         // Moving a ciphertext to another name fails (the name is associated data).
         std::fs::write(&path, text.replace("gene:a", "gene:b")).unwrap();
         assert!(EncryptedFileStore::open(path, "correct horse battery").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_encrypted_file_store_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("secrets.enc");
+        let store = EncryptedFileStore::open(path.clone(), "correct horse battery").unwrap();
+        store.set("gene:a", b"k").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

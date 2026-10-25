@@ -11,9 +11,12 @@ COPY . .
 RUN cargo build --release -p netgene-cli
 
 FROM debian:bookworm-slim
+# The data dir is created here, owned by netgene, so a named volume mounted
+# on it inherits that ownership (otherwise Docker creates it as root).
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 netgene
+    && useradd --create-home --uid 10001 netgene \
+    && install -d -m 0700 -o netgene -g netgene /home/netgene/.netgene
 COPY --from=builder /usr/src/netgene-core/target/release/netgene /usr/local/bin/netgene
 
 USER netgene
@@ -24,5 +27,7 @@ ENV RUST_LOG=info
 ENV NETGENE_SECRET_STORE=file
 
 EXPOSE 7777
-# NETGENE_GENE_ID names a gene created in the volume (see deploy/docker-compose.yml).
-CMD ["sh", "-c", "exec netgene p2p listen --gene \"$NETGENE_GENE_ID\" --port 7777"]
+# `p2p listen` reads the gene id from NETGENE_GENE_ID (see deploy/docker-compose.yml).
+# Other commands: `docker run … netgene-os gene init --name my-node`.
+ENTRYPOINT ["netgene"]
+CMD ["p2p", "listen", "--port", "7777"]
