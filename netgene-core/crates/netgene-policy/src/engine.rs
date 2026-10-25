@@ -48,6 +48,9 @@ pub struct Policy {
     /// Upper bound for `node.provision` `count`.
     #[serde(default = "default_max_nodes")]
     pub max_nodes_per_request: u64,
+    /// Confirmations must carry a hardware user-presence proof (e.g. Windows Hello).
+    #[serde(default)]
+    pub require_user_presence: bool,
 }
 
 fn default_max_nodes() -> u64 {
@@ -57,7 +60,7 @@ fn default_max_nodes() -> u64 {
 impl Default for Policy {
     /// Reads are allowed, anything that changes state needs confirmation.
     fn default() -> Self {
-        Self { version: 1, rules: vec![], max_nodes_per_request: default_max_nodes() }
+        Self { version: 1, rules: vec![], max_nodes_per_request: default_max_nodes(), require_user_presence: false }
     }
 }
 
@@ -69,6 +72,20 @@ impl Policy {
         }
         let text = std::fs::read_to_string(path)?;
         serde_json::from_str(&text).with_context(|| format!("Invalid policy file {}", path.display()))
+    }
+}
+
+/// Capabilities from a capability token the caller has already verified.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Grant {
+    pub token_id: uuid::Uuid,
+    pub capabilities: Vec<String>,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl Grant {
+    pub fn is_active(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        now < self.expires_at
     }
 }
 
@@ -106,6 +123,12 @@ impl PolicyEngine {
 
     /// Decide whether `actor` may perform `action`.
     pub fn evaluate(&self, actor: &NetGene, action: &Action) -> Decision {
+        self.evaluate_with_grants(actor, &[], action)
+    }
+
+    /// Like [`Self::evaluate`], also counting capabilities granted to the
+    /// actor by verified, unexpired capability tokens.
+    pub fn evaluate_with_grants(&self, actor: &NetGene, granted: &[String], action: &Action) -> Decision {
         let Some(spec) = action.spec() else {
             return Decision::Deny { reason: format!("'{}' is not in the action catalog", action.kind) };
         };
@@ -113,8 +136,11 @@ impl PolicyEngine {
         if actor.status != GeneStatus::Active {
             return Decision::Deny { reason: format!("actor gene is {}", actor.status) };
         }
-        // The Master Gene holds every capability; delegated genes need it explicitly.
-        if actor.role != GeneRole::Master && !actor.has_capability(spec.capability) {
+        // The Master Gene holds every capability; delegated genes need it explicitly or via a token.
+        let has_capability = actor.role == GeneRole::Master
+            || actor.has_capability(spec.capability)
+            || granted.iter().any(|c| c == spec.capability);
+        if !has_capability {
             return Decision::Deny { reason: format!("actor lacks capability '{}'", spec.capability) };
         }
 
@@ -180,6 +206,18 @@ mod tests {
         let obs = observer();
         assert_eq!(engine.evaluate(&obs, &Action::new("safeguard.scan", json!({}))), Decision::Allow);
         assert!(matches!(engine.evaluate(&obs, &Action::new("network.optimize", json!({}))), Decision::Deny { .. }));
+    }
+
+    #[test]
+    fn test_granted_capability_allows() {
+        let engine = PolicyEngine::new(Policy::default());
+        let obs = observer();
+        let action = Action::new("network.optimize", json!({}));
+        assert!(matches!(engine.evaluate(&obs, &action), Decision::Deny { .. }));
+        assert!(matches!(
+            engine.evaluate_with_grants(&obs, &["network.admin".to_string()], &action),
+            Decision::Confirm { .. }
+        ));
     }
 
     #[test]

@@ -2,10 +2,12 @@
 
 use clap::Subcommand;
 use anyhow::Result;
+use super::grants;
 use netgene_gene::{
     identity::NetGene,
     secret::OsKeyring,
-    storage::{default_gene_dir, save_gene, list_genes},
+    CapabilityToken, RevocationList,
+    storage::{default_gene_dir, save_gene, list_genes, load_gene},
 };
 
 #[derive(Subcommand)]
@@ -44,6 +46,32 @@ pub enum GeneCommand {
     Import {
         /// Path to the exported JSON
         file: std::path::PathBuf,
+    },
+    /// Grant capabilities to a child gene with a time-limited, signed token
+    Grant {
+        /// Issuing gene (must be the subject's parent)
+        #[arg(long)]
+        issuer: String,
+        /// Gene receiving the capabilities
+        #[arg(long)]
+        subject: String,
+        /// Capabilities, comma separated (e.g. node.spawn,network.admin)
+        #[arg(long, value_delimiter = ',', required = true)]
+        caps: Vec<String>,
+        /// Lifetime in minutes
+        #[arg(long, default_value_t = 60)]
+        ttl_minutes: i64,
+    },
+    /// List capability tokens and whether each is currently valid
+    Tokens,
+    /// Revoke a capability token by id
+    RevokeToken {
+        token_id: uuid::Uuid,
+    },
+    /// Create a hardware user-presence key (Windows Hello) for confirming actions
+    EnrollPresence {
+        #[arg(long)]
+        gene: String,
     },
 }
 
@@ -173,6 +201,66 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
                 .find(|g| g.id.to_string() == id)
                 .ok_or_else(|| anyhow::anyhow!("Gene {} not found", id))?;
             println!("{}", serde_json::to_string_pretty(&gene)?);
+        }
+
+        GeneCommand::Grant { issuer, subject, caps, ttl_minutes } => {
+            let (issuer_gene, issuer_kp) = load_gene(&issuer, &dir, &secrets)?;
+            let subject_gene = list_genes(&dir)?
+                .into_iter()
+                .find(|g| g.id.to_string() == subject)
+                .ok_or_else(|| anyhow::anyhow!("Subject gene {} not found", subject))?;
+            if !subject_gene.verify_lineage(&issuer_gene) {
+                anyhow::bail!("Only the verified parent of a gene can grant it capabilities");
+            }
+            let token = CapabilityToken::issue(&issuer_gene, &issuer_kp, &subject_gene, caps, chrono::Duration::minutes(ttl_minutes))?;
+            let path = grants::tokens_dir().join(format!("{}.json", token.claims.token_id));
+            std::fs::create_dir_all(grants::tokens_dir())?;
+            std::fs::write(&path, serde_json::to_string_pretty(&token)?)?;
+            println!("🎫 Token {} → {} [{}] until {}", token.claims.token_id, subject_gene.name,
+                token.claims.capabilities.join(", "), token.claims.expires_at.format("%Y-%m-%d %H:%M UTC"));
+            println!("   Saved to {}", path.display());
+        }
+
+        GeneCommand::Tokens => {
+            let genes = list_genes(&dir)?;
+            let revoked = RevocationList::load(&grants::revocation_path())?;
+            let tokens = grants::list_tokens()?;
+            println!("🎫 {} capability token(s)", tokens.len());
+            for t in tokens {
+                let status = match grants::check(&t, &genes, &revoked) {
+                    Ok(()) => "VALID".to_string(),
+                    Err(e) => format!("INVALID ({})", e),
+                };
+                println!("  • {} subject={} [{}] expires {} — {}", t.claims.token_id, t.claims.subject_gene_id,
+                    t.claims.capabilities.join(", "), t.claims.expires_at.format("%Y-%m-%d %H:%M UTC"), status);
+            }
+        }
+
+        GeneCommand::RevokeToken { token_id } => {
+            let path = grants::revocation_path();
+            let mut list = RevocationList::load(&path)?;
+            if list.revoke(token_id) {
+                list.save(&path)?;
+                println!("⛔ Token {} revoked", token_id);
+            } else {
+                println!("Token {} was already revoked", token_id);
+            }
+        }
+
+        GeneCommand::EnrollPresence { gene } => {
+            let gene = list_genes(&dir)?
+                .into_iter()
+                .find(|g| g.id.to_string() == gene)
+                .ok_or_else(|| anyhow::anyhow!("Gene {} not found", gene))?;
+            if !netgene_presence::is_available() {
+                anyhow::bail!("No hardware user verification available on this device (Windows Hello is required for now)");
+            }
+            println!("🔐 Follow the Windows Hello prompt to create the presence key...");
+            let id = gene.id;
+            let enrollment = tokio::task::spawn_blocking(move || netgene_presence::enroll(id)).await??;
+            enrollment.save(&grants::presence_dir())?;
+            println!("✅ Presence key enrolled for {} ({})", gene.name, enrollment.method);
+            println!("   Set \"require_user_presence\": true in ~/.netgene/policy.json to require it for confirmations.");
         }
 
         GeneCommand::Import { file } => {

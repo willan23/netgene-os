@@ -9,12 +9,13 @@ members = [
     "crates/netgene-vault",
     "crates/netgene-safeguard",
     "crates/netgene-policy",
+    "crates/netgene-presence",
     "crates/netgene-cli",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 authors = ["NetGene OS contributors"]
 license = "MIT OR Apache-2.0"
@@ -90,3 +91,4 @@ netgene-wasm      = { path = "crates/netgene-wasm" }
 netgene-vault     = { path = "crates/netgene-vault" }
 netgene-safeguard = { path = "crates/netgene-safeguard" }
 netgene-policy    = { path = "crates/netgene-policy" }
+netgene-presence  = { path = "crates/netgene-presence" }

@@ -2517,6 +2517,7 @@ dependencies = [
  "netgene-kernel",
  "netgene-llm",
  "netgene-policy",
+ "netgene-presence",
  "netgene-store",
  "netgene-vault",
  "serde",
@@ -2530,7 +2531,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2551,15 +2552,15 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
  "chrono",
  "netgene-gene",
  "netgene-llm",
  "netgene-policy",
+ "netgene-presence",
  "netgene-store",
  "serde",
  "serde_json",
@@ -2571,7 +2572,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2584,10 +2585,9 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "chrono",
  "hex",
  "netgene-gene",
@@ -2599,8 +2599,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "netgene-presence"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha3",
+ "uuid",
+ "windows",
+ "windows-future",
+]
+
+[[package]]
 name = "netgene-store"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2745,7 +2761,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -4643,7 +4659,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

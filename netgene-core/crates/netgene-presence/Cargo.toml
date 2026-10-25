@@ -1,0 +1,24 @@
+[package]
+name = "netgene-presence"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene Presence — hardware-backed user verification (Windows Hello) for confirming agent actions"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+sha3 = { workspace = true }
+base64 = { workspace = true }
+ring = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Security_Credentials", "Security_Cryptography", "Security_Cryptography_Core", "Storage_Streams", "Foundation"] }
+windows-future = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
