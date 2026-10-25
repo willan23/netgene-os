@@ -4,9 +4,8 @@ use clap::{Args, Subcommand};
 use anyhow::Result;
 use chrono::Utc;
 use netgene_gene::{
-    secret::OsKeyring,
-    storage::{default_gene_dir, list_genes, load_gene},
-    HybridPublicKey, NetGene,
+    storage::{default_gene_dir, list_genes, load_gene, trusted_lineage},
+    HybridPublicKey,
 };
 use netgene_p2p::{allowlist_from_genes, Inbound, MeshMessage, NetGeneP2PNode, Outbound, PeerPolicy};
 use tokio::sync::mpsc;
@@ -53,25 +52,11 @@ pub enum P2pCommand {
     },
 }
 
-/// Genes allowed in the mesh: the root of `me`'s lineage plus every local
-/// gene whose lineage signature verifies against that root.
-fn trusted_genes(me: &NetGene, genes: &[NetGene]) -> Vec<NetGene> {
-    let root = match me.parent_id {
-        None => Some(me.clone()),
-        Some(parent_id) => genes.iter().find(|g| g.id == parent_id && me.verify_lineage(g)).cloned(),
-    };
-    let Some(root) = root else { return vec![me.clone()] };
-
-    let mut trusted: Vec<NetGene> = genes.iter().filter(|g| g.verify_lineage(&root)).cloned().collect();
-    trusted.push(root);
-    trusted
-}
-
 fn build_node(identity: &NodeIdentity, port: u16) -> Result<(NetGeneP2PNode, mpsc::Sender<Outbound>, mpsc::Receiver<Inbound>)> {
     let dir = default_gene_dir();
-    let (me, kp) = load_gene(&identity.gene, &dir, &OsKeyring::new())?;
+    let (me, kp) = load_gene(&identity.gene, &dir, &netgene_gene::default_store()?)?;
 
-    let trusted = trusted_genes(&me, &list_genes(&dir)?);
+    let trusted = trusted_lineage(&me, &list_genes(&dir)?);
     let policy = if identity.open {
         PeerPolicy::Open
     } else {
@@ -163,7 +148,7 @@ pub async fn run(cmd: P2pCommand) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use netgene_gene::GeneRole;
+    use netgene_gene::{GeneRole, NetGene};
 
     #[test]
     fn test_trusted_genes_follow_lineage() {
@@ -172,7 +157,7 @@ mod tests {
         let (stranger, _) = NetGene::generate_master("stranger").unwrap();
         let genes = vec![master.clone(), node_a.clone(), stranger.clone()];
 
-        let ids: Vec<_> = trusted_genes(&node_a, &genes).into_iter().map(|g| g.id).collect();
+        let ids: Vec<_> = trusted_lineage(&node_a, &genes).into_iter().map(|g| g.id).collect();
         assert!(ids.contains(&master.id));
         assert!(ids.contains(&node_a.id));
         assert!(!ids.contains(&stranger.id));

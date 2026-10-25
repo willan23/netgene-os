@@ -13,6 +13,7 @@
 pub mod action;
 pub mod engine;
 pub mod audit;
+pub mod export;
 
 pub use action::{Action, ActionSpec, Risk, ACTION_CATALOG};
 pub use engine::{Decision, Effect, Grant, Policy, PolicyEngine, Rule};

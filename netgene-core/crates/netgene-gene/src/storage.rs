@@ -98,6 +98,20 @@ fn migrate_legacy_key(gene_id: &str, dir: &Path, secrets: &dyn SecretStore) -> R
     Ok(Some(key_bytes))
 }
 
+/// Genes `me` trusts: the root of its lineage plus every gene whose lineage
+/// signature verifies against that root.
+pub fn trusted_lineage(me: &NetGene, genes: &[NetGene]) -> Vec<NetGene> {
+    let root = match me.parent_id {
+        None => Some(me.clone()),
+        Some(parent_id) => genes.iter().find(|g| g.id == parent_id && me.verify_lineage(g)).cloned(),
+    };
+    let Some(root) = root else { return vec![me.clone()] };
+
+    let mut trusted: Vec<NetGene> = genes.iter().filter(|g| g.verify_lineage(&root)).cloned().collect();
+    trusted.push(root);
+    trusted
+}
+
 /// List all stored genes in a directory.
 pub fn list_genes(dir: &Path) -> Result<Vec<NetGene>> {
     if !dir.exists() {

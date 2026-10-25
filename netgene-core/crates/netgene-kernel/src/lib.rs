@@ -24,6 +24,7 @@ pub mod memory;
 pub mod kernel;
 pub mod error;
 pub mod marketplace;
+pub mod reputation;
 
 pub use kernel::{DispatchOutcome, KernelConfig, NetSphereKernel};
 pub use agent::{Agent, AgentId, AgentStatus, AgentMessage};

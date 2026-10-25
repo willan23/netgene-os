@@ -45,10 +45,11 @@ Base: [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md). Cada fase só começa quando
 - [ ] Avaliar `iroh` para NAT traversal.
 - [ ] Testes de integração com 3+ nós em Docker e fuzzing com `cargo-fuzz`.
 
-## Fase 3: Produto
+## Fase 3: Produto ✅ (v0.8.0)
 
-- [ ] Marketplace de agentes assinados com reputação.
-- [ ] App mobile (Tauri mobile).
-- [ ] eBPF real no Linux (`aya`) para telemetria de rede.
-- [ ] Integração empresarial: OIDC/SAML, exportação de auditoria e deploy auto-hospedado.
+- [x] **Reputação no marketplace:** avaliações com assinatura híbrida, presas ao digest do manifesto. Só revisores da sua linhagem contam (resistente a Sybil), há uma avaliação por revisor, autoavaliações são descartadas e a nota é uma média bayesiana.
+- [x] **App Android (Tauri mobile):** APK de debug para arm64 e x86_64. As chaves ficam no **Android Keystore** (`android-native-keyring-store`), e os dados no diretório privado do app. Testado no emulador (API 36): a chave do vault fica cifrada e sobrevive a reinícios.
+- [x] **eBPF real (`aya` 0.14):** contador XDP em C. No WSL2, `ebpf watch` contou 6008 pkt/s e o Safeguard marcou Critical.
+- [x] **Integração empresarial:** OIDC (`gene grant-oidc`), exportação de auditoria em OCSF e CEF, cofre cifrado em arquivo para servidores, Docker Compose e systemd.
+- [ ] SAML, cache de JWKS, publicação do APK assinado na Play Store e iOS.
 - [ ] Módulos avançados (TPM via `tss-esapi`, otimização) apenas quando houver um caso de uso concreto.

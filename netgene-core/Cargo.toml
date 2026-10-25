@@ -10,12 +10,14 @@ members = [
     "crates/netgene-safeguard",
     "crates/netgene-policy",
     "crates/netgene-presence",
+    "crates/netgene-enterprise",
+    "crates/netgene-ebpf",
     "crates/netgene-cli",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["NetGene OS contributors"]
 license = "MIT OR Apache-2.0"
@@ -60,7 +62,7 @@ rand = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 
 # HTTP client (for Ollama)
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
 # Persistence (sled embedded DB)
 sled = "0.34"
@@ -92,3 +94,5 @@ netgene-vault     = { path = "crates/netgene-vault" }
 netgene-safeguard = { path = "crates/netgene-safeguard" }
 netgene-policy    = { path = "crates/netgene-policy" }
 netgene-presence  = { path = "crates/netgene-presence" }
+netgene-enterprise = { path = "crates/netgene-enterprise" }
+netgene-ebpf      = { path = "crates/netgene-ebpf" }

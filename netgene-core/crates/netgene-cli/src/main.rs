@@ -8,7 +8,7 @@ use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
 mod commands;
-use commands::{gene, agent, store_cmd, llm_cmd, p2p_cmd, wasm_cmd, vault_cmd};
+use commands::{gene, agent, store_cmd, llm_cmd, p2p_cmd, wasm_cmd, vault_cmd, ebpf_cmd};
 
 /// NetGene OS — private agent mesh
 #[derive(Parser)]
@@ -74,6 +74,11 @@ enum Commands {
         #[command(subcommand)]
         action: vault_cmd::VaultCommand,
     },
+    /// 🐧 eBPF kernel telemetry (Linux, root)
+    Ebpf {
+        #[command(subcommand)]
+        action: ebpf_cmd::EbpfCommand,
+    },
 }
 
 #[tokio::main]
@@ -96,6 +101,7 @@ async fn main() -> Result<()> {
         Commands::P2p { action } => p2p_cmd::run(action).await?,
         Commands::Wasm { action } => wasm_cmd::run(action).await?,
         Commands::Vault { action } => vault_cmd::run(action).await?,
+        Commands::Ebpf { action } => ebpf_cmd::run(action).await?,
     }
 
     Ok(())

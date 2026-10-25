@@ -1,0 +1,15 @@
+[package]
+name = "netgene-ebpf"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "NetGene eBPF — XDP flow counters on Linux (real kernel telemetry)"
+build = "build.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+aya = "0.14"

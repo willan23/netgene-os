@@ -24,7 +24,7 @@ pub async fn run(command: VaultCommand) -> Result<()> {
         .unwrap_or_else(|_| PathBuf::from("."));
     let vault_dir = home.join(".netgene").join("vault");
     
-    let vault = NetGeneVault::open(vault_dir, &netgene_gene::OsKeyring::new())?;
+    let vault = NetGeneVault::open(vault_dir, &netgene_gene::default_store()?)?;
 
     match command {
         VaultCommand::Store { filename, data } => {
