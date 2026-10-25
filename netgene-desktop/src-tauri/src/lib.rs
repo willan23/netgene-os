@@ -82,6 +82,15 @@ async fn get_audit_log(limit: usize, kernel: State<'_, Arc<NetSphereKernel>>) ->
     Ok(entries.into_iter().rev().take(limit).collect())
 }
 
+/// `~/.netgene`, resolved like the core crates do (HOME / USERPROFILE).
+fn netgene_home() -> std::path::PathBuf {
+    std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".netgene")
+}
+
 /// The first Master Gene whose key is in the OS keystore, else a throw-away one.
 /// Also returns the operator's presence enrolment, if any.
 fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<(KernelConfig, Option<PresenceEnrollment>)> {
@@ -277,6 +286,16 @@ pub fn run() {
             llm_chat
         ])
         .setup(|app| {
+            // On mobile, HOME is not the app's directory: keep every ~/.netgene
+            // path (genes, store, vault, audit) inside the private app data dir.
+            #[cfg(mobile)]
+            {
+                let data_dir = app.path().app_data_dir()?;
+                std::fs::create_dir_all(&data_dir)?;
+                std::env::set_var("HOME", &data_dir);
+                std::env::set_var("USERPROFILE", &data_dir);
+            }
+
             let marketplace = Marketplace::new();
             app.manage(marketplace);
             
@@ -285,7 +304,7 @@ pub fn run() {
             app.manage(store);
 
             // Boot the kernel once, acting as the local Master Gene when one exists.
-            let netgene_dir = app.path().home_dir()?.join(".netgene");
+            let netgene_dir = netgene_home();
             let (config, presence) = kernel_config(&netgene_dir).expect("Failed to load kernel configuration");
             app.manage(presence);
             let kernel = tauri::async_runtime::block_on(async {
@@ -295,7 +314,7 @@ pub fn run() {
             
             start_telemetry(app.handle().clone());
 
-            let vault_path = app.path().home_dir()?.join(".netgene").join("vault");
+            let vault_path = netgene_home().join("vault");
             // Without a usable secret store (e.g. on mobile, for now) the app runs without the vault.
             match netgene_gene::default_store().and_then(|secrets| NetGeneVault::open(vault_path, &secrets)) {
                 Ok(vault) => { app.manage(Arc::new(Mutex::new(vault))); }

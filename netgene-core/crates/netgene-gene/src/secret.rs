@@ -81,10 +81,53 @@ impl SecretStore for OsKeyring {
     }
 }
 
-/// Platforms without a supported keystore backend yet (Android, iOS…):
+/// Platforms without a supported keystore backend yet (iOS…):
 /// fail loudly instead of silently keeping keys in memory, which would lose
 /// them on restart.
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+#[cfg(target_os = "android")]
+fn android_entry(service: &str, name: &str) -> Result<keyring_core::Entry> {
+    use keyring_core::api::CredentialStoreApi;
+    static STORE: std::sync::OnceLock<std::sync::Arc<android_native_keyring_store::Store>> = std::sync::OnceLock::new();
+    let store = match STORE.get() {
+        Some(store) => store.clone(),
+        None => {
+            let store = android_native_keyring_store::Store::new()
+                .map_err(|e| anyhow::anyhow!("Cannot open the Android Keystore: {}", e))?;
+            STORE.get_or_init(|| store).clone()
+        }
+    };
+    store
+        .build(service, name, None)
+        .map_err(|e| anyhow::anyhow!("Cannot open Android Keystore entry '{}': {}", name, e))
+}
+
+/// Android: secrets in SharedPreferences, encrypted with an AES key that
+/// never leaves the Android Keystore.
+#[cfg(target_os = "android")]
+impl SecretStore for OsKeyring {
+    fn get(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        match android_entry(&self.service, name)?.get_secret() {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
+            Err(e) => Err(anyhow::anyhow!("Cannot read secret '{}' from the Android Keystore: {}", name, e)),
+        }
+    }
+
+    fn set(&self, name: &str, secret: &[u8]) -> Result<()> {
+        android_entry(&self.service, name)?
+            .set_secret(secret)
+            .map_err(|e| anyhow::anyhow!("Cannot write secret '{}' to the Android Keystore: {}", name, e))
+    }
+
+    fn delete(&self, name: &str) -> Result<()> {
+        match android_entry(&self.service, name)?.delete_credential() {
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
+            Err(e) => Err(anyhow::anyhow!("Cannot delete secret '{}' from the Android Keystore: {}", name, e)),
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux", target_os = "android")))]
 impl SecretStore for OsKeyring {
     fn get(&self, _name: &str) -> Result<Option<Vec<u8>>> {
         anyhow::bail!("No OS keystore backend on this platform yet (use NETGENE_SECRET_STORE=file)")

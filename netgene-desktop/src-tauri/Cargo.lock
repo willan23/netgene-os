@@ -44,6 +44,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "android-native-keyring-store"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c6349ddff23194f8fdce2ea8849380f5a4868c1648965b70e801e104cba9b3"
+dependencies = [
+ "base64 0.22.1",
+ "jni",
+ "keyring-core",
+ "log",
+ "ndk-context",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2206,6 +2224,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "keyring-core"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29fbf4b551298c67925f38cf341a1ada797a75f1837bdf8ae1fc8e2ebc6efb59"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2463,13 +2490,15 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
+ "android-native-keyring-store",
  "anyhow",
  "base64 0.22.1",
  "chrono",
  "hex",
  "keyring",
+ "keyring-core",
  "ml-dsa",
  "rand 0.8.8",
  "ring",
@@ -2484,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2506,7 +2535,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2519,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2534,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-presence"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2550,7 +2579,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-store"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3354,7 +3383,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5307,9 +5336,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]

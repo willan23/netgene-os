@@ -62,7 +62,7 @@ Mais detalhes em [netgene-core/docs/ARCHITECTURE.md](netgene-core/docs/ARCHITECT
 | `netgene-safeguard` | 🧪 | Detecção de anomalias por z-score em janela deslizante. | As ações de "self-healing" são apenas registradas, não executadas. |
 | `netgene-wasm` | ✅ | **Executa** módulos com assinatura híbrida de um autor confiável (a chave tem de bater exatamente, incluindo a parte pós-quântica), com wasmtime 36 LTS, limite de CPU (fuel) e de memória. **Permissões declaradas e assinadas** (`log`, `io`, `kv`, `clock`): só são linkadas as funções de host das permissões que o módulo declara **e** que o sandbox concede (`--allow`), e qualquer outro import é recusado. Não há WASI, rede nem sistema de arquivos. | O KV é por execução (o chamador decide se o persiste). Não há permissão de rede por design. |
 | `netgene-vault` | 🧪 | Cifra arquivos em pedaços com AES-256-GCM. A chave fica no cofre do sistema e **sobrevive a reinícios**. Cada pedaço é ligado ao arquivo, à posição e ao total (AAD). | Só local: ainda não há replicação entre dispositivos. Arquivos de versões ≤ 0.3 não podem ser lidos (a chave antiga se perdia). |
-| `netgene-desktop` | 🧪 | Painel de nós, eventos, agentes, marketplace (assina com uma Gene local), vault e terminal de intenções com botões **Confirmar/Rejeitar**. Age como a Master Gene local. | Sem autenticação local (passkeys reais estão previstos). |
+| `netgene-desktop` | 🧪 | Painel de nós, eventos, agentes, marketplace (assina com uma Gene local), vault e terminal de intenções com botões **Confirmar/Rejeitar**. Age como a Master Gene local. **Também roda no Android** (Tauri mobile): as chaves ficam cifradas por uma chave do **Android Keystore**, e os dados ficam no diretório privado do app. | Sem autenticação local (passkeys reais estão previstos). O APK ainda não foi publicado, e iOS não foi testado. |
 | `netgene-cli` | ✅ | Comandos `gene` (init, spawn, verify, export, import, grant, tokens, revoke-token, enroll-presence), `agent` (dispatch `--gene` [`--confirm`], audit, policy, publish, market), `store`, `llm`, `p2p`, `wasm` (sign, run) e `vault`. | — |
 
 **Removido na versão 0.3.0:** os módulos quântico/QAOA, QPU, BCI neural, DAO, TPM, eBPF, Kubernetes, IoT lite, cloud mesh, builder, TUI e o "FHE". Eles eram simulados (valores fixos ou verificações que sempre aceitavam) e davam garantias que não existiam. O histórico do git preserva o código. Alguns podem voltar quando houver uma implementação real (por exemplo, eBPF com `aya` ou TPM com `tss-esapi`). O motivo de cada remoção está em [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md).
@@ -103,7 +103,7 @@ O plano completo está em [ROADMAP.md](ROADMAP.md). Resumo:
 1. **Fase 0 (concluída):** higiene do repositório, CI funcional, licença e documentação honesta.
 2. **Fase 1 (concluída, v0.4.0):** chaves no cofre do sistema, vault persistente e autenticado, WASM assinado e executado de fato, marketplace assinado, P2P com identidade Gene e allowlist.
 3. **Fase 2 (concluída, v0.7.0):** motor de políticas, log de auditoria, identidade e assinaturas híbridas, capability tokens, Windows Hello, runtime WASM com permissões, sessões ML-KEM no P2P e `redb`.
-4. **Fase 3 (em andamento, v0.8.0):** reputação no marketplace, OIDC, exportação SIEM, deploy auto-hospedado e eBPF real estão feitos. O app mobile (Android) está gerado, mas ainda falta guardar as chaves no Android Keystore.
+4. **Fase 3 (concluída, v0.8.0):** reputação no marketplace, OIDC, exportação SIEM, deploy auto-hospedado, eBPF real e app **Android** com as chaves no Android Keystore.
 
 ---
 
