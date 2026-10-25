@@ -249,15 +249,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2531,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2552,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2572,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2585,7 +2576,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2600,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-presence"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2616,17 +2607,14 @@ dependencies = [
 
 [[package]]
 name = "netgene-store"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
- "bincode",
  "chrono",
- "netgene-gene",
+ "redb",
  "serde",
  "serde_json",
  "sled",
- "thiserror 2.0.21",
- "tokio",
  "tracing",
  "uuid",
 ]
@@ -2761,7 +2749,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -3432,6 +3420,15 @@ name = "raw-window-handle"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20675572f6f24e9e76ef639bc5552774ed45f1c30e2951e1e99c59888861c539"
+
+[[package]]
+name = "redb"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39178e0a867f9e3eaa6292a4ab1dd3613f2519c5b564341e1e7b29b270736cc4"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "redox_syscall"
@@ -4659,7 +4656,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

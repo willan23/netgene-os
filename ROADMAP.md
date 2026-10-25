@@ -27,18 +27,21 @@ Base: [AUDITORIA_2026-10.md](AUDITORIA_2026-10.md). Cada fase só começa quando
 - [ ] **CI:** `cargo deny` e `clippy -D warnings`.
 - [ ] **Linux:** validar o build e o cofre (Secret Service) no Docker e no CI.
 
-## Fase 2: Núcleo real (em andamento, v0.5.0)
+## Fase 2: Núcleo real ✅ (v0.5.0 – v0.7.0)
 
 - [x] **Identidade híbrida pós-quântica:** cada Gene nova tem uma chave Ed25519 e uma ML-DSA-65 (`ml-dsa` da RustCrypto, FIPS 204). A linhagem é assinada pelas duas, e a assinatura PQ cobre as duas chaves do filho, então retirá-la ou trocá-la é detectado. A semente PQ fica no cofre do sistema.
-- [ ] Troca de chaves híbrida X25519 + ML-KEM-768 no transporte P2P (o Noise do libp2p ainda é clássico).
+- [x] **Sessões P2P pós-quânticas** (v0.7.0): o protocolo `/netgene/pq/1` faz um handshake X25519 + ML-KEM-768, assinado pelas duas Genes (chaves fixadas pela allowlist), e deriva as chaves com HKDF sobre o transcript. As mensagens privadas usam ChaCha20-Poly1305 com contador anti-replay (CLI: `p2p connect --private`).
+- [ ] Gossip (broadcast) também confidencial pós-quântico; hoje é só assinado.
 - [x] **Assinaturas híbridas** (v0.6.0) nos manifestos do marketplace, nos módulos WASM, nos tokens e no log de auditoria, todas por uma única primitiva que liga a chave pública aos bytes assinados. O sandbox WASM exige que a chave do autor bata exatamente com a confiável. Logs de auditoria da v0.5 são arquivados como `audit.jsonl.v1`.
 - [x] **Capability tokens** (v0.6.0): a Gene mãe delega capacidades a uma filha por um tempo limitado (`gene grant`). Os tokens são assinados e revogáveis (`gene revoke-token`, `~/.netgene/revoked-tokens.json`), e quem emite só delega o que tem. A política conta só os tokens válidos naquele momento.
 - [x] **Motor de políticas (`netgene-policy`):** o LLM só **propõe** e a política **decide**. Há um catálogo de ações (capacidade + risco), regras em `~/.netgene/policy.json` e limites de parâmetros. As ações de escrita exigem confirmação humana (CLI `--confirm`, botão no desktop).
-- [ ] Runtime de agentes em WASM Component Model com permissões declaradas (rede, arquivos, chaves).
+- [x] **Runtime WASM com permissões** (v0.7.0): o manifesto assinado declara as permissões (`log`, `io`, `kv`, `clock`), o sandbox concede um subconjunto (`--allow`) e só essas funções de host são linkadas, com cotas por permissão e ponteiros verificados. O guest roda numa thread com 8 MB de pilha (evita estouro na thread principal do Windows).
+- [ ] Migrar a ABI para o WASM Component Model (WIT) e permitir persistir o KV por agente.
 - [x] **Log de auditoria append-only:** encadeado por SHA3-256 e assinado por entrada. O kernel recusa continuar um log adulterado. CLI: `agent audit`.
 - [x] **Confirmação com hardware** (v0.6.0, `netgene-presence`): com `require_user_presence`, uma ação `confirm` só é aprovada com uma assinatura do Windows Hello (RSA-2048 no TPM, verificada com `ring`) sobre o desafio daquela proposta. A falha também vai para o log de auditoria.
 - [ ] Mesmo fator no macOS (Touch ID / Secure Enclave) e passkeys WebAuthn (`webauthn-rs`) para aprovar pelo celular.
-- [ ] Migrar `sled` para `redb`. Avaliar `automerge` ou `loro` para CRDTs.
+- [x] **`sled` → `redb` 4.4** (v0.7.0), com migração automática e retomável (um marcador grava na mesma transação da importação). Os eventos agora são listados em ordem cronológica (antes vinham em ordem aleatória).
+- [ ] Remover a dependência `sled` (só usada pela migração). Avaliar `automerge` ou `loro` para CRDTs.
 - [ ] Avaliar `iroh` para NAT traversal.
 - [ ] Testes de integração com 3+ nós em Docker e fuzzing com `cargo-fuzz`.
 

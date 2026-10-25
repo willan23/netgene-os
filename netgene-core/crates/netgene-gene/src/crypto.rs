@@ -62,6 +62,15 @@ impl GeneKeyPair {
         Ok(self)
     }
 
+    /// Independent copy of this key pair (both halves).
+    pub fn try_clone(&self) -> Result<Self> {
+        let copy = Self::from_pkcs8(self.pkcs8.to_vec())?;
+        match &self.pq {
+            Some(pq) => copy.with_pq_seed(pq.seed_bytes()),
+            None => Ok(copy),
+        }
+    }
+
     /// The post-quantum half, if any.
     pub fn pq(&self) -> Option<&PqKeyPair> {
         self.pq.as_ref()

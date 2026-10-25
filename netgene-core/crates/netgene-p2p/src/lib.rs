@@ -6,6 +6,7 @@ pub mod events;
 pub mod behaviour;
 pub mod node;
 pub mod identity;
+pub mod pqsession;
 
 pub use events::*;
 pub use behaviour::*;

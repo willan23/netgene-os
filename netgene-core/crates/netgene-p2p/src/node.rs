@@ -3,18 +3,22 @@
 use anyhow::Result;
 use libp2p::{
     core::upgrade,
-    gossipsub, identify, identity, kad, mdns, noise,
+    gossipsub, identify, kad, mdns, noise, request_response,
     swarm::{Swarm, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, Transport,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Transport,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use libp2p::futures::StreamExt;
 use tracing::{info, warn};
+use netgene_gene::crypto::GeneKeyPair;
+use netgene_gene::HybridPublicKey;
 
-use crate::behaviour::{NetGeneBehaviour, NetGeneBehaviourEvent};
+use crate::behaviour::{NetGeneBehaviour, NetGeneBehaviourEvent, PqRequest, PqResponse, PQ_PROTOCOL};
 use crate::events::MeshMessage;
+use crate::identity::{libp2p_keypair_from_gene, peer_id_for_key};
+use crate::pqsession::{self, PendingInitiator, Session};
 
 pub const GOSSIPSUB_TOPIC: &str = "netgene-mesh-v1";
 
@@ -36,22 +40,46 @@ impl PeerPolicy {
     }
 }
 
+/// What the application asks the node to send.
+#[derive(Debug, Clone)]
+pub enum Outbound {
+    /// Signed gossip to every subscribed peer (authenticated, classical transport).
+    Broadcast(MeshMessage),
+    /// End-to-end message over a hybrid X25519 + ML-KEM-768 session.
+    Private { to: PeerId, msg: MeshMessage },
+}
+
+/// What the node reports to the application.
+#[derive(Debug, Clone)]
+pub enum Inbound {
+    Gossip { from: Option<PeerId>, msg: MeshMessage },
+    Private { from: PeerId, msg: MeshMessage },
+    SessionEstablished { peer: PeerId },
+}
+
 pub struct NetGeneP2PNode {
     pub peer_id: PeerId,
     swarm: Swarm<NetGeneBehaviour>,
     policy: PeerPolicy,
-    msg_tx: mpsc::Sender<MeshMessage>,
-    msg_rx: mpsc::Receiver<MeshMessage>,
+    gene_kp: GeneKeyPair,
+    /// Expected Gene key per peer; a handshake presenting another key is refused.
+    pinned_keys: HashMap<PeerId, HybridPublicKey>,
+    sessions: HashMap<PeerId, Session>,
+    pending: HashMap<PeerId, PendingInitiator>,
+    outbox: HashMap<PeerId, Vec<MeshMessage>>,
+    inbound_tx: mpsc::Sender<Inbound>,
+    outbound_rx: mpsc::Receiver<Outbound>,
 }
 
 impl NetGeneP2PNode {
-    /// Create a node with the given libp2p identity (normally derived from a
-    /// Gene, see [`crate::identity::libp2p_keypair_from_gene`]).
+    /// Create a node running as the Gene owning `gene_kp`; its libp2p
+    /// identity is derived from the Gene key.
     pub fn new(
         listen_port: u16,
-        local_key: identity::Keypair,
+        gene_kp: GeneKeyPair,
         policy: PeerPolicy,
-    ) -> Result<(Self, mpsc::Sender<MeshMessage>, mpsc::Receiver<MeshMessage>)> {
+    ) -> Result<(Self, mpsc::Sender<Outbound>, mpsc::Receiver<Inbound>)> {
+        let local_key = libp2p_keypair_from_gene(&gene_kp)?;
         let peer_id = PeerId::from(local_key.public());
         info!("🌐 Initializing P2P node with PeerId: {}", peer_id);
         match &policy {
@@ -82,37 +110,29 @@ impl NetGeneP2PNode {
         let topic = gossipsub::IdentTopic::new(GOSSIPSUB_TOPIC);
         gossipsub.subscribe(&topic)?;
 
-        // mDNS setup
         let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
-
-        // Kademlia DHT setup
-        let store = kad::store::MemoryStore::new(peer_id);
-        let kademlia = kad::Behaviour::new(peer_id, store);
-
-        // Identify setup
+        let kademlia = kad::Behaviour::new(peer_id, kad::store::MemoryStore::new(peer_id));
         let identify = identify::Behaviour::new(identify::Config::new(
             format!("/netgene/{}", env!("CARGO_PKG_VERSION")),
             local_key.public(),
         ));
+        let pq = request_response::json::Behaviour::new(
+            [(StreamProtocol::new(PQ_PROTOCOL), request_response::ProtocolSupport::Full)],
+            request_response::Config::default(),
+        );
 
-        let behaviour = NetGeneBehaviour {
-            gossipsub,
-            mdns,
-            kademlia,
-            identify,
-        };
+        let behaviour = NetGeneBehaviour { gossipsub, mdns, kademlia, identify, pq };
 
         let mut swarm = Swarm::new(
             transport,
             behaviour,
             peer_id,
-            libp2p::swarm::Config::with_tokio_executor(),
+            libp2p::swarm::Config::with_tokio_executor().with_idle_connection_timeout(Duration::from_secs(60)),
         );
 
         let listen_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", listen_port).parse()?;
         swarm.listen_on(listen_addr)?;
 
-        // Channels for outbound/inbound mesh messages
         let (out_tx, out_rx) = mpsc::channel(100);
         let (in_tx, in_rx) = mpsc::channel(100);
 
@@ -120,11 +140,24 @@ impl NetGeneP2PNode {
             peer_id,
             swarm,
             policy,
-            msg_tx: in_tx,
-            msg_rx: out_rx,
+            gene_kp,
+            pinned_keys: HashMap::new(),
+            sessions: HashMap::new(),
+            pending: HashMap::new(),
+            outbox: HashMap::new(),
+            inbound_tx: in_tx,
+            outbound_rx: out_rx,
         };
 
         Ok((node, out_tx, in_rx))
+    }
+
+    /// Pin the expected Gene keys of known peers (both halves are compared).
+    pub fn with_pinned_keys(mut self, keys: impl IntoIterator<Item = HybridPublicKey>) -> Result<Self> {
+        for key in keys {
+            self.pinned_keys.insert(peer_id_for_key(&key)?, key);
+        }
+        Ok(self)
     }
 
     /// Dial a remote peer multiaddr
@@ -134,22 +167,100 @@ impl NetGeneP2PNode {
         Ok(())
     }
 
+    fn check_pinned(&self, peer: &PeerId, key: &HybridPublicKey) -> Result<()> {
+        match self.pinned_keys.get(peer) {
+            Some(pinned) if pinned != key => anyhow::bail!("Peer {} presented a Gene key that differs from the pinned one", peer),
+            _ => Ok(()),
+        }
+    }
+
+    fn start_handshake(&mut self, peer: PeerId) {
+        if self.sessions.contains_key(&peer) || self.pending.contains_key(&peer) {
+            return;
+        }
+        match pqsession::initiate(&self.gene_kp) {
+            Ok((pending, init)) => {
+                self.pending.insert(peer, pending);
+                self.swarm.behaviour_mut().pq.send_request(&peer, PqRequest::Init(init));
+            }
+            Err(e) => warn!("Cannot start PQ handshake with {}: {}", peer, e),
+        }
+    }
+
+    async fn session_ready(&mut self, peer: PeerId) {
+        info!("🔐 Post-quantum session established with {} (X25519 + ML-KEM-768)", peer);
+        let _ = self.inbound_tx.send(Inbound::SessionEstablished { peer }).await;
+        for msg in self.outbox.remove(&peer).unwrap_or_default() {
+            self.send_private(peer, msg);
+        }
+    }
+
+    fn send_private(&mut self, peer: PeerId, msg: MeshMessage) {
+        let Some(session) = self.sessions.get_mut(&peer) else {
+            self.outbox.entry(peer).or_default().push(msg);
+            self.start_handshake(peer);
+            return;
+        };
+        match serde_json::to_vec(&msg).map_err(anyhow::Error::from).and_then(|bytes| session.seal(&bytes)) {
+            Ok(frame) => {
+                self.swarm.behaviour_mut().pq.send_request(&peer, PqRequest::Data(frame));
+            }
+            Err(e) => warn!("Cannot encrypt message for {}: {}", peer, e),
+        }
+    }
+
+    fn handle_request(&mut self, peer: PeerId, request: PqRequest) -> (PqResponse, Option<Inbound>, bool) {
+        if !self.policy.allows(&peer) {
+            return (PqResponse::Reject("peer not allowed".into()), None, false);
+        }
+        match request {
+            PqRequest::Init(init) => {
+                // Simultaneous handshakes: the lower PeerId's Init wins.
+                if self.pending.contains_key(&peer) && self.peer_id < peer {
+                    return (PqResponse::Reject("handshake already in progress".into()), None, false);
+                }
+                if let Err(e) = self.check_pinned(&peer, &init.initiator_key) {
+                    return (PqResponse::Reject(e.to_string()), None, false);
+                }
+                match pqsession::respond(&self.gene_kp, &init, &peer) {
+                    Ok((session, resp)) => {
+                        self.pending.remove(&peer);
+                        self.sessions.insert(peer, session);
+                        (PqResponse::Accept(resp), None, true)
+                    }
+                    Err(e) => (PqResponse::Reject(e.to_string()), None, false),
+                }
+            }
+            PqRequest::Data(frame) => {
+                let Some(session) = self.sessions.get_mut(&peer) else {
+                    return (PqResponse::Reject("no session".into()), None, false);
+                };
+                let opened = session.open(&frame).and_then(|bytes| Ok(serde_json::from_slice::<MeshMessage>(&bytes)?));
+                match opened {
+                    Ok(msg) => (PqResponse::Ack, Some(Inbound::Private { from: peer, msg }), false),
+                    Err(e) => (PqResponse::Reject(e.to_string()), None, false),
+                }
+            }
+        }
+    }
+
     /// Runs the P2P event loop in background task
     pub async fn run(mut self) {
         let topic = gossipsub::IdentTopic::new(GOSSIPSUB_TOPIC);
 
         loop {
             tokio::select! {
-                // Outbound message to broadcast on Gossipsub mesh
-                Some(msg) = self.msg_rx.recv() => {
-                    if let Ok(bytes) = serde_json::to_vec(&msg) {
-                        if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), bytes) {
-                            warn!("Gossipsub publish error: {}", e);
+                Some(outbound) = self.outbound_rx.recv() => match outbound {
+                    Outbound::Broadcast(msg) => {
+                        if let Ok(bytes) = serde_json::to_vec(&msg) {
+                            if let Err(e) = self.swarm.behaviour_mut().gossipsub.publish(topic.clone(), bytes) {
+                                warn!("Gossipsub publish error: {}", e);
+                            }
                         }
                     }
-                }
+                    Outbound::Private { to, msg } => self.send_private(to, msg),
+                },
 
-                // Swarm network events
                 event = self.swarm.select_next_some() => match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         info!("📡 Listening on P2P multiaddr: {}", address);
@@ -158,7 +269,14 @@ impl NetGeneP2PNode {
                         if !self.policy.allows(&peer_id) {
                             warn!("🚫 Rejecting connection from peer {} (not in allowlist)", peer_id);
                             let _ = self.swarm.disconnect_peer_id(peer_id);
+                        } else if self.peer_id < peer_id {
+                            // Deterministic initiator avoids duplicate handshakes.
+                            self.start_handshake(peer_id);
                         }
+                    }
+                    SwarmEvent::ConnectionClosed { peer_id, num_established: 0, .. } => {
+                        self.sessions.remove(&peer_id);
+                        self.pending.remove(&peer_id);
                     }
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                         for (peer, addr) in list {
@@ -182,10 +300,45 @@ impl NetGeneP2PNode {
                             .report_message_validation_result(&message_id, &propagation_source, verdict);
 
                         match parsed {
-                            Ok(msg) if accept => { let _ = self.msg_tx.send(msg).await; }
+                            Ok(msg) if accept => { let _ = self.inbound_tx.send(Inbound::Gossip { from: message.source, msg }).await; }
                             _ => warn!("🚫 Rejected mesh message from {}", propagation_source),
                         }
                     }
+                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::Pq(request_response::Event::Message { peer, message, .. })) => match message {
+                        request_response::Message::Request { request, channel, .. } => {
+                            let (response, inbound, established) = self.handle_request(peer, request);
+                            if let PqResponse::Reject(reason) = &response {
+                                warn!("🚫 PQ request from {} rejected: {}", peer, reason);
+                            }
+                            let _ = self.swarm.behaviour_mut().pq.send_response(channel, response);
+                            if let Some(inbound) = inbound {
+                                let _ = self.inbound_tx.send(inbound).await;
+                            }
+                            if established {
+                                self.session_ready(peer).await;
+                            }
+                        }
+                        request_response::Message::Response { response, .. } => match response {
+                            PqResponse::Accept(resp) => {
+                                let Some(pending) = self.pending.remove(&peer) else { continue };
+                                let result = self
+                                    .check_pinned(&peer, &resp.responder_key)
+                                    .and_then(|_| pqsession::complete(pending, &resp, &peer));
+                                match result {
+                                    Ok(session) => {
+                                        self.sessions.insert(peer, session);
+                                        self.session_ready(peer).await;
+                                    }
+                                    Err(e) => warn!("🚫 PQ handshake with {} failed: {}", peer, e),
+                                }
+                            }
+                            PqResponse::Ack => {}
+                            PqResponse::Reject(reason) => {
+                                self.pending.remove(&peer);
+                                warn!("🚫 Peer {} rejected PQ request: {}", peer, reason);
+                            }
+                        },
+                    },
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
                         info!("🔑 Identified peer {} with agent protocol {}", peer_id, info.protocol_version);
                     }

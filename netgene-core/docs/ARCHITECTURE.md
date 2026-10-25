@@ -1,4 +1,4 @@
-# Arquitetura do NetGene OS (v0.6.0)
+# Arquitetura do NetGene OS (v0.7.0)
 
 ## Camadas
 
@@ -52,7 +52,7 @@
 | `~/.netgene/tokens/` | Capability tokens (`<token_id>.json`) |
 | `~/.netgene/revoked-tokens.json` | Ids de tokens revogados |
 | `~/.netgene/presence/` | Chave pública do Windows Hello por Gene (a privada fica no TPM) |
-| `~/.netgene/db/` | Banco sled (nós, eventos, memória de agentes) |
+| `~/.netgene/store.redb` | Banco redb (nós, eventos, memória de agentes); `db.sled-migrated/` é o backup da base antiga |
 | `~/.netgene/vault/` | Chunks cifrados (formato v1) e `.meta` |
 | `~/.netgene/marketplace/` | Manifestos de agentes assinados |
 

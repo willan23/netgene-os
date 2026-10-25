@@ -15,7 +15,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 authors = ["NetGene OS contributors"]
 license = "MIT OR Apache-2.0"
@@ -28,7 +28,6 @@ tokio = { version = "1", features = ["full"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-bincode = "1"
 
 # Cryptography
 ring = "0.17"
@@ -79,6 +78,7 @@ libp2p = { version = "0.57", features = [
     "ping",
     "macros",
     "request-response",
+    "json",
 ] }
 
 # Internal crates
