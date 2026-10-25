@@ -8,8 +8,9 @@
 use std::collections::HashSet;
 use anyhow::{Context, Result};
 use libp2p::{identity, PeerId};
+use base64::Engine as _;
 use netgene_gene::crypto::GeneKeyPair;
-use netgene_gene::NetGene;
+use netgene_gene::{HybridPublicKey, NetGene};
 
 /// libp2p keypair derived from a Gene's Ed25519 key.
 pub fn libp2p_keypair_from_gene(kp: &GeneKeyPair) -> Result<identity::Keypair> {
@@ -26,8 +27,13 @@ pub fn libp2p_keypair_from_gene(kp: &GeneKeyPair) -> Result<identity::Keypair> {
 
 /// PeerId a node running as `gene` will have.
 pub fn peer_id_for_gene(gene: &NetGene) -> Result<PeerId> {
-    let pk = identity::ed25519::PublicKey::try_from_bytes(&gene.public_key_bytes()?)
-        .context("Gene public key is not a valid Ed25519 key")?;
+    peer_id_for_key(&HybridPublicKey::from_gene(gene))
+}
+
+/// PeerId derived from the Ed25519 half of a Gene key.
+pub fn peer_id_for_key(key: &HybridPublicKey) -> Result<PeerId> {
+    let ed = base64::engine::general_purpose::STANDARD.decode(&key.ed25519_b64)?;
+    let pk = identity::ed25519::PublicKey::try_from_bytes(&ed).context("Gene public key is not a valid Ed25519 key")?;
     Ok(PeerId::from_public_key(&identity::PublicKey::from(pk)))
 }
 

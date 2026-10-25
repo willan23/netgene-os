@@ -32,10 +32,11 @@ pub async fn run(cmd: StoreCommand, json: bool) -> Result<()> {
 
     match cmd {
         StoreCommand::Status => {
-            println!("📂 NetGene Persistent Store (Sled DB)");
-            println!("   Path: ~/.netgene/db");
-            println!("   Engine: Sled v0.34 (ACID, Zero-Config)");
-            println!("   CRDT: LWW-Register ready");
+            println!("📂 NetGene Persistent Store");
+            println!("   Path:   {}", netgene_store::default_db_path().display());
+            println!("   Engine: redb (single file, ACID)");
+            println!("   Nodes:  {}", store.list_nodes()?.len());
+            println!("   CRDT:   LWW-Register");
         }
 
         StoreCommand::Nodes => {

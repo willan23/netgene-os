@@ -4,17 +4,22 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "NetGene Store — Sled-based persistence layer with CRDT state synchronization"
+description = "NetGene Store — redb-based persistence layer with CRDT state synchronization"
+
+[features]
+default = ["sled-migration"]
+# One-time import of databases written by NetGene <= 0.6 (sled backend).
+sled-migration = ["dep:sled"]
 
 [dependencies]
-sled = { workspace = true }
+redb = "4.4"
+sled = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-bincode = { workspace = true }
-tokio = { workspace = true }
 anyhow = { workspace = true }
-thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-netgene-gene = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

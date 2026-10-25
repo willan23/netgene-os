@@ -49,7 +49,7 @@ enum Commands {
         #[command(subcommand)]
         action: agent::AgentCommand,
     },
-    /// 📂 Persistent Store (Sled DB)
+    /// 📂 Persistent Store (redb)
     Store {
         #[command(subcommand)]
         action: store_cmd::StoreCommand,

@@ -404,15 +404,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -957,7 +948,9 @@ version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
+ "getrandom 0.4.3",
  "hybrid-array",
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -2257,6 +2250,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kem"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01737161ba802849cfd486b5bd209d38ba4943494c249a8126005170c7621edd"
+dependencies = [
+ "crypto-common 0.2.2",
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "keyring"
 version = "3.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2612,6 +2615,8 @@ dependencies = [
  "libp2p-identity",
  "libp2p-swarm",
  "rand 0.10.3",
+ "serde",
+ "serde_json",
  "smallvec",
  "tracing",
 ]
@@ -2840,6 +2845,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ml-kem"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9ba01ebcf90f6aff8e9b9f55bb69b19e6250e4ade5787d0040eaa27dd226238"
+dependencies = [
+ "hybrid-array",
+ "kem",
+ "module-lattice",
+ "rand_core 0.10.1",
+ "sha3 0.12.0",
+ "shake",
+ "zeroize",
+]
+
+[[package]]
 name = "module-lattice"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2954,7 +2974,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "netgene-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -2981,7 +3001,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2993,7 +3013,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
- "sha3",
+ "sha3 0.10.9",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
@@ -3003,7 +3023,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3025,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3038,14 +3058,18 @@ dependencies = [
 
 [[package]]
 name = "netgene-p2p"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "libp2p",
+ "ml-kem",
  "netgene-gene",
+ "ring",
  "serde",
  "serde_json",
+ "sha3 0.10.9",
  "thiserror 2.0.21",
  "tokio",
  "tracing",
@@ -3054,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3062,7 +3086,7 @@ dependencies = [
  "netgene-gene",
  "serde",
  "serde_json",
- "sha3",
+ "sha3 0.10.9",
  "tempfile",
  "tracing",
  "uuid",
@@ -3070,7 +3094,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-presence"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3078,7 +3102,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
- "sha3",
+ "sha3 0.10.9",
  "tempfile",
  "uuid",
  "windows",
@@ -3087,7 +3111,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-safeguard"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3101,17 +3125,15 @@ dependencies = [
 
 [[package]]
 name = "netgene-store"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
- "bincode",
  "chrono",
- "netgene-gene",
+ "redb",
  "serde",
  "serde_json",
  "sled",
- "thiserror 2.0.21",
- "tokio",
+ "tempfile",
  "tracing",
  "uuid",
 ]
@@ -3136,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-wasm"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3144,7 +3166,7 @@ dependencies = [
  "netgene-gene",
  "serde",
  "serde_json",
- "sha3",
+ "sha3 0.10.9",
  "tracing",
  "uuid",
  "wasmtime",
@@ -3939,6 +3961,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "redb"
+version = "4.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39178e0a867f9e3eaa6292a4ab1dd3613f2519c5b564341e1e7b29b270736cc4"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4374,6 +4405,17 @@ checksum = "77fd7028345d415a4034cf8777cd4f8ab1851274233b45f84e3d955502d93874"
 dependencies = [
  "digest 0.10.7",
  "keccak 0.1.6",
+]
+
+[[package]]
+name = "sha3"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc9bad02c26382724b2d2692c6f179285e4b54eeecd7968f52a50059c3c11759"
+dependencies = [
+ "digest 0.11.3",
+ "keccak 0.2.2",
+ "sponge-cursor",
 ]
 
 [[package]]

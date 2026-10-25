@@ -6,9 +6,10 @@ use chrono::Utc;
 use netgene_gene::{
     secret::OsKeyring,
     storage::{default_gene_dir, list_genes, load_gene},
-    NetGene,
+    HybridPublicKey, NetGene,
 };
-use netgene_p2p::{allowlist_from_genes, libp2p_keypair_from_gene, MeshMessage, NetGeneP2PNode, PeerPolicy};
+use netgene_p2p::{allowlist_from_genes, Inbound, MeshMessage, NetGeneP2PNode, Outbound, PeerPolicy};
+use tokio::sync::mpsc;
 
 #[derive(Args)]
 pub struct NodeIdentity {
@@ -39,6 +40,9 @@ pub enum P2pCommand {
         /// Local port to bind
         #[arg(short, long, default_value = "7779")]
         port: u16,
+        /// Send this text as a private (post-quantum encrypted) message once the session is up
+        #[arg(long)]
+        private: Option<String>,
     },
     /// Broadcast a test message over the mesh
     Broadcast {
@@ -63,20 +67,30 @@ fn trusted_genes(me: &NetGene, genes: &[NetGene]) -> Vec<NetGene> {
     trusted
 }
 
-fn build_node(identity: &NodeIdentity, port: u16) -> Result<(NetGeneP2PNode, tokio::sync::mpsc::Sender<MeshMessage>, tokio::sync::mpsc::Receiver<MeshMessage>)> {
+fn build_node(identity: &NodeIdentity, port: u16) -> Result<(NetGeneP2PNode, mpsc::Sender<Outbound>, mpsc::Receiver<Inbound>)> {
     let dir = default_gene_dir();
     let (me, kp) = load_gene(&identity.gene, &dir, &OsKeyring::new())?;
-    let keypair = libp2p_keypair_from_gene(&kp)?;
 
+    let trusted = trusted_genes(&me, &list_genes(&dir)?);
     let policy = if identity.open {
         PeerPolicy::Open
     } else {
-        let trusted = trusted_genes(&me, &list_genes(&dir)?);
         println!("   Trusted genes: {}", trusted.iter().map(|g| g.short_fp.as_str()).collect::<Vec<_>>().join(", "));
         PeerPolicy::Allowlist(allowlist_from_genes(&trusted)?)
     };
 
-    NetGeneP2PNode::new(port, keypair, policy)
+    let (node, out_tx, in_rx) = NetGeneP2PNode::new(port, kp, policy)?;
+    // Peers must present exactly the (hybrid) key of their local Gene record.
+    let node = node.with_pinned_keys(trusted.iter().map(HybridPublicKey::from_gene))?;
+    Ok((node, out_tx, in_rx))
+}
+
+fn print_inbound(event: &Inbound) {
+    match event {
+        Inbound::Gossip { from, msg } => println!("📩 [gossip from {}]: {:?}", from.map(|p| p.to_string()).unwrap_or_default(), msg),
+        Inbound::Private { from, msg } => println!("🔐 [private from {}]: {:?}", from, msg),
+        Inbound::SessionEstablished { peer } => println!("🔐 Post-quantum session (X25519 + ML-KEM-768) established with {}", peer),
+    }
 }
 
 pub async fn run(cmd: P2pCommand) -> Result<()> {
@@ -94,15 +108,16 @@ pub async fn run(cmd: P2pCommand) -> Result<()> {
             });
 
             println!("🟢 P2P Mesh node running. Listening for events... (Press Ctrl+C to stop)");
-            while let Some(msg) = in_rx.recv().await {
-                println!("📩 [Mesh Event]: {:?}", msg);
+            while let Some(event) = in_rx.recv().await {
+                print_inbound(&event);
             }
         }
 
-        P2pCommand::Connect { identity, addr, port } => {
+        P2pCommand::Connect { identity, addr, port, private } => {
             let multiaddr: libp2p::Multiaddr = addr.parse()?;
             println!("🌐 Starting NetGene P2P Node on port {}...", port);
-            let (mut node, _out_tx, mut in_rx) = build_node(&identity, port)?;
+            let (mut node, out_tx, mut in_rx) = build_node(&identity, port)?;
+            let sender = node.peer_id.to_string();
             println!("   Peer ID:  {}", node.peer_id);
             println!("   Dialing:  {}", multiaddr);
             println!();
@@ -113,8 +128,14 @@ pub async fn run(cmd: P2pCommand) -> Result<()> {
             });
 
             println!("🟢 Dialed peer. Listening for events... (Press Ctrl+C to stop)");
-            while let Some(msg) = in_rx.recv().await {
-                println!("📩 [Mesh Event]: {:?}", msg);
+            let mut pending_private = private;
+            while let Some(event) = in_rx.recv().await {
+                print_inbound(&event);
+                if let (Inbound::SessionEstablished { peer }, Some(text)) = (&event, pending_private.take()) {
+                    let msg = MeshMessage::IntentBroadcast { sender: sender.clone(), intent: text.clone(), timestamp: Utc::now() };
+                    out_tx.send(Outbound::Private { to: *peer, msg }).await?;
+                    println!("🔐 Sent private message to {}: \"{}\"", peer, text);
+                }
             }
         }
 
@@ -131,7 +152,7 @@ pub async fn run(cmd: P2pCommand) -> Result<()> {
                 timestamp: Utc::now(),
             };
 
-            out_tx.send(mesh_msg).await?;
+            out_tx.send(Outbound::Broadcast(mesh_msg)).await?;
             println!("📡 Broadcasted message: \"{}\"", msg);
         }
     }
