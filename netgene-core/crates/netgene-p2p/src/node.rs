@@ -2,10 +2,10 @@
 
 use anyhow::Result;
 use libp2p::{
-    core::upgrade,
-    gossipsub, identify, kad, mdns, noise, request_response,
+    autonat, dcutr, gossipsub, identify, kad, mdns, noise, relay, request_response,
+    multiaddr::Protocol,
     swarm::{Swarm, SwarmEvent},
-    tcp, yamux, Multiaddr, PeerId, StreamProtocol, Transport,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
@@ -44,6 +44,39 @@ impl PeerPolicy {
     }
 }
 
+/// How a node listens and reaches peers behind NAT.
+#[derive(Debug, Clone)]
+pub struct NodeConfig {
+    /// TCP and QUIC (UDP) port.
+    pub listen_port: u16,
+    /// Discover peers on the local network with mDNS.
+    pub mdns: bool,
+    /// Act as a circuit relay for members (a node with a public address).
+    pub relay_server: bool,
+    /// Relays to reserve a slot on (`/ip4/…/tcp/7777/p2p/<relay PeerId>`), so
+    /// members can reach this node through them; a direct connection is then
+    /// attempted by hole punching (DCUtR).
+    pub relays: Vec<Multiaddr>,
+    /// Publicly reachable addresses of this node. A relay only serves once it
+    /// has one; without any, a relay announces its listen addresses.
+    pub external_addrs: Vec<Multiaddr>,
+}
+
+impl NodeConfig {
+    pub fn new(listen_port: u16) -> Self {
+        Self { listen_port, mdns: true, relay_server: false, relays: vec![], external_addrs: vec![] }
+    }
+}
+
+/// Relay limits for members (libp2p's defaults, 2 min / 128 KiB, suit public relays).
+fn member_relay_config() -> relay::Config {
+    relay::Config {
+        max_circuit_duration: Duration::from_secs(60 * 60),
+        max_circuit_bytes: 1 << 30,
+        ..Default::default()
+    }
+}
+
 /// What the application asks the node to send.
 #[derive(Debug, Clone)]
 pub enum Outbound {
@@ -74,6 +107,10 @@ pub struct NetGeneP2PNode {
     outbox: HashMap<PeerId, Vec<PrivatePayload>>,
     group: GroupCrypto,
     pending_gossip: HashMap<PeerId, VecDeque<EncryptedGossip>>,
+    /// Relays to reserve a slot on, by PeerId; removed once the reservation is requested.
+    relays: HashMap<PeerId, Multiaddr>,
+    /// Relay without configured external addresses: announce listen addresses instead.
+    announce_listen_addrs: bool,
     inbound_tx: mpsc::Sender<Inbound>,
     outbound_rx: mpsc::Receiver<Outbound>,
 }
@@ -86,6 +123,14 @@ impl NetGeneP2PNode {
         gene_kp: GeneKeyPair,
         policy: PeerPolicy,
     ) -> Result<(Self, mpsc::Sender<Outbound>, mpsc::Receiver<Inbound>)> {
+        Self::with_config(NodeConfig::new(listen_port), gene_kp, policy)
+    }
+
+    pub fn with_config(
+        config: NodeConfig,
+        gene_kp: GeneKeyPair,
+        policy: PeerPolicy,
+    ) -> Result<(Self, mpsc::Sender<Outbound>, mpsc::Receiver<Inbound>)> {
         let local_key = libp2p_keypair_from_gene(&gene_kp)?;
         let peer_id = PeerId::from(local_key.public());
         info!("🌐 Initializing P2P node with PeerId: {}", peer_id);
@@ -93,13 +138,6 @@ impl NetGeneP2PNode {
             PeerPolicy::Allowlist(peers) => info!("🔒 Peer allowlist active ({} peers)", peers.len()),
             PeerPolicy::Open => warn!("⚠️ Open peer policy: any peer on the network can join"),
         }
-
-        // Transport setup: TCP + Noise + Yamux
-        let transport = tcp::tokio::Transport::default()
-            .upgrade(upgrade::Version::V1)
-            .authenticate(noise::Config::new(&local_key)?)
-            .multiplex(yamux::Config::default())
-            .boxed();
 
         // Gossipsub: signed messages, strict validation, application-level acceptance.
         let gossipsub_config = gossipsub::ConfigBuilder::default()
@@ -117,28 +155,61 @@ impl NetGeneP2PNode {
         let topic = gossipsub::IdentTopic::new(GOSSIPSUB_TOPIC);
         gossipsub.subscribe(&topic)?;
 
-        let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
-        let kademlia = kad::Behaviour::new(peer_id, kad::store::MemoryStore::new(peer_id));
-        let identify = identify::Behaviour::new(identify::Config::new(
-            format!("/netgene/{}", env!("CARGO_PKG_VERSION")),
-            local_key.public(),
-        ));
-        let pq = request_response::json::Behaviour::new(
-            [(StreamProtocol::new(PQ_PROTOCOL), request_response::ProtocolSupport::Full)],
-            request_response::Config::default(),
-        );
+        let mdns = if config.mdns { Some(mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?) } else { None };
+        let relay_server = config.relay_server.then(|| relay::Behaviour::new(peer_id, member_relay_config()));
 
-        let behaviour = NetGeneBehaviour { gossipsub, mdns, kademlia, identify, pq };
+        // TCP + QUIC, Noise + Yamux, plus the relay client transport (`/p2p-circuit`).
+        let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
+            .with_tokio()
+            .with_tcp(tcp::Config::default().nodelay(true), noise::Config::new, yamux::Config::default)?
+            .with_quic()
+            .with_relay_client(noise::Config::new, yamux::Config::default)?
+            .with_behaviour(|key, relay_client| NetGeneBehaviour {
+                gossipsub,
+                mdns: mdns.into(),
+                kademlia: kad::Behaviour::new(peer_id, kad::store::MemoryStore::new(peer_id)),
+                identify: identify::Behaviour::new(identify::Config::new(
+                    format!("/netgene/{}", env!("CARGO_PKG_VERSION")),
+                    key.public(),
+                )),
+                pq: request_response::json::Behaviour::new(
+                    [(StreamProtocol::new(PQ_PROTOCOL), request_response::ProtocolSupport::Full)],
+                    request_response::Config::default(),
+                ),
+                relay_client,
+                relay_server: relay_server.into(),
+                dcutr: dcutr::Behaviour::new(peer_id),
+                autonat: autonat::Behaviour::new(peer_id, autonat::Config::default()),
+            })
+            .map_err(|e| anyhow::anyhow!("Behaviour init error: {}", e))?
+            .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+            .build();
 
-        let mut swarm = Swarm::new(
-            transport,
-            behaviour,
-            peer_id,
-            libp2p::swarm::Config::with_tokio_executor().with_idle_connection_timeout(Duration::from_secs(60)),
-        );
-
-        let listen_addr: Multiaddr = format!("/ip4/0.0.0.0/tcp/{}", listen_port).parse()?;
-        swarm.listen_on(listen_addr)?;
+        swarm.listen_on(format!("/ip4/0.0.0.0/tcp/{}", config.listen_port).parse()?)?;
+        swarm.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", config.listen_port).parse()?)?;
+        if config.relay_server {
+            info!("🛰️  Relay server enabled (members only)");
+        }
+        let mut relays = HashMap::new();
+        for addr in &config.external_addrs {
+            swarm.add_external_address(addr.clone());
+        }
+        let announce_listen_addrs = config.relay_server && config.external_addrs.is_empty();
+        for relay_addr in &config.relays {
+            let relay_peer = relay_addr.iter().find_map(|p| match p {
+                Protocol::P2p(id) => Some(id),
+                _ => None,
+            });
+            let Some(relay_peer) = relay_peer else {
+                anyhow::bail!("Relay address {} must end with /p2p/<relay PeerId>", relay_addr);
+            };
+            if !policy.allows(&relay_peer) {
+                anyhow::bail!("Relay {} is not a trusted member", relay_peer);
+            }
+            // The reservation is requested once the relay is connected (see `run`).
+            swarm.dial(relay_addr.clone())?;
+            relays.insert(relay_peer, relay_addr.clone());
+        }
 
         let (out_tx, out_rx) = mpsc::channel(100);
         let (in_tx, in_rx) = mpsc::channel(100);
@@ -150,6 +221,8 @@ impl NetGeneP2PNode {
             policy,
             group,
             pending_gossip: HashMap::new(),
+            relays,
+            announce_listen_addrs,
             gene_kp,
             pinned_keys: HashMap::new(),
             sessions: HashMap::new(),
@@ -353,13 +426,32 @@ impl NetGeneP2PNode {
                 event = self.swarm.select_next_some() => match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
                         info!("📡 Listening on P2P multiaddr: {}", address);
+                        let unspecified = address.iter().any(|p| matches!(p, Protocol::Ip4(ip) if ip.is_unspecified()));
+                        if self.announce_listen_addrs && !unspecified && !address.iter().any(|p| p == Protocol::P2pCircuit) {
+                            self.swarm.add_external_address(address);
+                        }
+                    }
+                    SwarmEvent::ListenerError { error, .. } => warn!("Listener error: {}", error),
+                    SwarmEvent::ListenerClosed { addresses, reason: Err(e), .. } => {
+                        warn!("Listener on {:?} closed: {}", addresses, e);
+                    }
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        warn!("Dial to {:?} failed: {}", peer_id, error);
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        if let Some(relay_addr) = self.relays.remove(&peer_id) {
+                            match self.swarm.listen_on(relay_addr.clone().with(Protocol::P2pCircuit)) {
+                                Ok(_) => info!("🛰️  Requesting a relay slot on {}", relay_addr),
+                                Err(e) => warn!("Cannot listen through relay {}: {}", relay_addr, e),
+                            }
+                        }
                         if !self.policy.allows(&peer_id) {
                             warn!("🚫 Rejecting connection from peer {} (not in allowlist)", peer_id);
                             let _ = self.swarm.disconnect_peer_id(peer_id);
-                        } else if self.peer_id < peer_id {
-                            // Deterministic initiator avoids duplicate handshakes.
+                        } else if self.peer_id < peer_id || self.outbox.contains_key(&peer_id) {
+                            // Deterministic initiator avoids duplicate handshakes; a node
+                            // with queued private messages starts one itself (ties are
+                            // resolved in handle_request).
                             self.start_handshake(peer_id);
                         }
                     }
@@ -443,8 +535,31 @@ impl NetGeneP2PNode {
                             }
                         },
                     },
+                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::Pq(request_response::Event::OutboundFailure { peer, error, .. })) => {
+                        // E.g. not connected yet: forget the attempt so the next connection retries.
+                        if self.pending.remove(&peer).is_some() {
+                            warn!("PQ handshake with {} could not be sent ({}); retrying on next connection", peer, error);
+                        } else {
+                            warn!("PQ message to {} failed: {}", peer, error);
+                        }
+                    }
                     SwarmEvent::Behaviour(NetGeneBehaviourEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
                         info!("🔑 Identified peer {} with agent protocol {}", peer_id, info.protocol_version);
+                        if self.policy.allows(&peer_id) {
+                            for addr in info.listen_addrs {
+                                self.swarm.behaviour_mut().kademlia.add_address(&peer_id, addr);
+                            }
+                        }
+                    }
+                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::RelayClient(relay::client::Event::ReservationReqAccepted { relay_peer_id, .. })) => {
+                        info!("🛰️  Reachable through relay {}", relay_peer_id);
+                    }
+                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::Dcutr(dcutr::Event { remote_peer_id, result })) => match result {
+                        Ok(_) => info!("🕳️  Hole punch to {} succeeded: direct connection", remote_peer_id),
+                        Err(e) => warn!("Hole punch to {} failed, staying on the relay: {}", remote_peer_id, e),
+                    },
+                    SwarmEvent::Behaviour(NetGeneBehaviourEvent::Autonat(autonat::Event::StatusChanged { new, .. })) => {
+                        info!("🌍 NAT status: {:?}", new);
                     }
                     _ => {}
                 }

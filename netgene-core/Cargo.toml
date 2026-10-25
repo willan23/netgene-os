@@ -82,6 +82,10 @@ libp2p = { version = "0.57", features = [
     "macros",
     "request-response",
     "json",
+    "quic",
+    "relay",
+    "dcutr",
+    "autonat",
 ] }
 
 # Internal crates
