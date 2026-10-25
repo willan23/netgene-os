@@ -22,10 +22,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: netgene-core
-      - run: cargo check --workspace --all-targets
+      - name: eBPF toolchain (clang + libbpf headers)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang libbpf-dev
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
 
   audit:
@@ -39,6 +44,15 @@ jobs:
         working-directory: netgene-core
       - run: cargo audit
         working-directory: netgene-desktop/src-tauri
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: netgene-core/Cargo.toml
 
   desktop:
     name: Desktop (windows)

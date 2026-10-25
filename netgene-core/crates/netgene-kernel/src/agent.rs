@@ -148,6 +148,12 @@ pub struct BuilderAgent {
     pub provisioned_nodes: Vec<String>,
 }
 
+impl Default for BuilderAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BuilderAgent {
     pub fn new() -> Self {
         Self {
@@ -186,7 +192,7 @@ impl Agent for BuilderAgent {
                 let action = msg.payload.get("action").and_then(|v| v.as_str()).unwrap_or("");
                 match action {
                     "spawn_node" | "provision_nodes" => {
-                        let node_id = format!("node-{}", Uuid::new_v4().to_string()[..8].to_string());
+                        let node_id = format!("node-{}", &Uuid::new_v4().to_string()[..8]);
                         self.provisioned_nodes.push(node_id.clone());
                         info!(agent = "BuilderAgent", node = %node_id, "Node provisioned");
                         Some(AgentMessage::new(
@@ -241,6 +247,12 @@ pub struct MonitorAgent {
     pub messages_processed: u64,
     pub started_at: DateTime<Utc>,
     pub alerts: Vec<String>,
+}
+
+impl Default for MonitorAgent {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MonitorAgent {
@@ -336,6 +348,12 @@ pub struct OptimizerAgent {
     pub optimizations_run: u64,
 }
 
+impl Default for OptimizerAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OptimizerAgent {
     pub fn new() -> Self {
         Self {
@@ -424,6 +442,12 @@ pub struct NetworkAgent {
     pub active_peers: usize,
 }
 
+impl Default for NetworkAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NetworkAgent {
     pub fn new() -> Self {
         Self {
@@ -486,6 +510,12 @@ pub struct EvolutionAgent {
     pub started_at: DateTime<Utc>,
     pub mutations_proposed: u64,
     pub executed_commands: Vec<String>,
+}
+
+impl Default for EvolutionAgent {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EvolutionAgent {

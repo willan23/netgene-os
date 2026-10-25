@@ -52,6 +52,12 @@ pub struct AnomalyDetector {
     pub events: Vec<AnomalyEvent>,
 }
 
+impl Default for AnomalyDetector {
+    fn default() -> Self {
+        Self::new(50, 2.5)
+    }
+}
+
 impl AnomalyDetector {
     pub fn new(window_size: usize, z_threshold: f64) -> Self {
         Self {
@@ -62,15 +68,11 @@ impl AnomalyDetector {
         }
     }
 
-    pub fn default() -> Self {
-        Self::new(50, 2.5)
-    }
-
     /// Ingest a new metric value and check for anomalies.
     pub fn ingest(&mut self, metric: &str, value: f64) -> Option<AnomalyEvent> {
         let window = self.windows
             .entry(metric.to_string())
-            .or_insert_with(VecDeque::new);
+            .or_default();
 
         // Score the value against the baseline *before* adding it: including
         // the outlier in its own baseline caps the z-score at (n-1)/sqrt(n),
@@ -227,7 +229,7 @@ mod tests {
         warm_up(&mut det, "bw", 30, 50.0);
         det.ingest("bw", 500.0);
         det.ingest("bw", 500.0);
-        assert!(det.events.len() >= 1);
+        assert!(!det.events.is_empty());
     }
 
     #[test]

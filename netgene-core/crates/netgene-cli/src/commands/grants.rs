@@ -35,7 +35,7 @@ pub fn list_tokens() -> Result<Vec<CapabilityToken>> {
     let mut tokens = vec![];
     for entry in std::fs::read_dir(dir)?.flatten() {
         let path = entry.path();
-        if path.extension().map_or(false, |e| e == "json") {
+        if path.extension().is_some_and(|e| e == "json") {
             match serde_json::from_str::<CapabilityToken>(&std::fs::read_to_string(&path)?) {
                 Ok(token) => tokens.push(token),
                 Err(e) => tracing::warn!("Ignoring token file {:?}: {}", path, e),

@@ -2,7 +2,9 @@
 //!
 //! Replaces the unmaintained `sled` backend. A sled database left by an
 //! older version (`~/.netgene/db/`) is migrated once into
-//! `~/.netgene/store.redb` and then renamed to `db.sled-migrated`.
+//! `~/.netgene/store.redb` and then renamed to `db.sled-migrated`, but only by
+//! builds with the `sled-migration` feature: the default build carries no sled
+//! code and just tells the user how to migrate.
 
 use anyhow::{Context, Result};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
@@ -69,6 +71,13 @@ impl NetGeneStore {
                 std::fs::rename(&legacy, &backup)?;
                 info!("📦 Migrated {} records from sled ({:?}) into redb; old data kept at {:?}", migrated, legacy, backup);
             }
+        }
+        #[cfg(not(feature = "sled-migration"))]
+        if path.is_none() && legacy_sled_dir().is_dir() {
+            tracing::warn!(
+                "A NetGene ≤ 0.6 database was found at {:?} and was not imported. Run once a build with                  `--features netgene-store/sled-migration` (e.g. `cargo run -p netgene-cli --features                  netgene-store/sled-migration -- store status`) to migrate it.",
+                legacy_sled_dir()
+            );
         }
 
         info!("📂 NetGene Store initialized at {:?}", db_path);

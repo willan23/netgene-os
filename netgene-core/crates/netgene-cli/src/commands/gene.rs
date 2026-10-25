@@ -280,9 +280,9 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
                 Some(path) => std::fs::read_to_string(path)?,
                 None => id_token,
             };
-            let jwks = netgene_enterprise::JwkSet::load(&config.jwks).await?;
+            let cache = netgene_enterprise::JwksCache::new(grants::netgene_home().join("jwks-cache.json"));
             let now = chrono::Utc::now();
-            let identity = netgene_enterprise::verify_id_token(&config, &jwks, &token, now)?;
+            let identity = cache.verify(&config, token.trim(), now, netgene_enterprise::JwkSet::fetch).await?;
             let caps = netgene_enterprise::capabilities_for(&config, &identity);
             if caps.is_empty() {
                 anyhow::bail!("ID token for {} has no role mapped to NetGene capabilities", identity.subject);

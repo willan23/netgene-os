@@ -21,6 +21,7 @@ version = "0.8.0"
 edition = "2021"
 authors = ["NetGene OS contributors"]
 license = "MIT OR Apache-2.0"
+publish = false
 repository = "https://github.com/willan23/netgene-os"
 
 [workspace.dependencies]
@@ -64,7 +65,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # HTTP client (for Ollama)
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
-# Persistence (sled embedded DB)
+# Legacy persistence (only for the opt-in sled-migration feature of netgene-store)
 sled = "0.34"
 
 # P2P networking (libp2p)

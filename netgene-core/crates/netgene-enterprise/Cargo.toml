@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+publish.workspace = true
 description = "NetGene Enterprise — OIDC identity binding: corporate ID tokens mapped to Gene capabilities"
 
 [dependencies]
@@ -18,3 +19,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+tempfile = "3"

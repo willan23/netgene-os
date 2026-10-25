@@ -298,7 +298,7 @@ impl WasmSandbox {
             anyhow::bail!("Corrupted WASM Module: Invalid WebAssembly magic header");
         }
 
-        if !self.trusted_author_keys.iter().any(|k| *k == module.author_key) {
+        if !self.trusted_author_keys.contains(&module.author_key) {
             anyhow::bail!("Security Violation: module author is not trusted by this sandbox");
         }
 

@@ -150,8 +150,11 @@ pub struct EncryptedFileStore {
     path: std::path::PathBuf,
     key: zeroize::Zeroizing<[u8; 32]>,
     salt: Vec<u8>,
-    entries: Mutex<HashMap<String, (Vec<u8>, Vec<u8>)>>,
+    entries: Mutex<FileEntries>,
 }
+
+/// name -> (nonce, ciphertext)
+type FileEntries = HashMap<String, (Vec<u8>, Vec<u8>)>;
 
 const FILE_STORE_ITERATIONS: u32 = 600_000;
 
@@ -210,7 +213,7 @@ impl EncryptedFileStore {
         Ok(ring::aead::LessSafeKey::new(unbound))
     }
 
-    fn persist(&self, entries: &HashMap<String, (Vec<u8>, Vec<u8>)>) -> Result<()> {
+    fn persist(&self, entries: &FileEntries) -> Result<()> {
         use base64::{engine::general_purpose::STANDARD as B64, Engine};
         let doc = FileStoreDoc {
             version: 1,

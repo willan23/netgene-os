@@ -22,6 +22,12 @@ pub struct MessageBus {
     bus_tx: mpsc::Sender<AgentMessage>,
 }
 
+impl Default for MessageBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageBus {
     /// Create a new message bus.
     pub fn new() -> Self {

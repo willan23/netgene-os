@@ -194,7 +194,7 @@ mod tests {
         assert!(token.verify(&master, &agent, &RevocationList::default(), Utc::now()).is_err());
 
         let mut extended = CapabilityToken::issue(&master, &kp, &agent, vec!["node.spawn".into()], Duration::hours(1)).unwrap();
-        extended.claims.expires_at = extended.claims.expires_at + Duration::days(365);
+        extended.claims.expires_at += Duration::days(365);
         assert!(extended.verify(&master, &agent, &RevocationList::default(), Utc::now()).is_err());
     }
 

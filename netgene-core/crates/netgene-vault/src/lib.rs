@@ -146,7 +146,7 @@ impl NetGeneVault {
         for entry in fs::read_dir(&self.storage_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "meta") {
+            if path.extension().is_some_and(|ext| ext == "meta") {
                 if let Ok(meta_str) = fs::read_to_string(&path) {
                     if let Ok(meta) = serde_json::from_str(&meta_str) {
                         files.push(meta);

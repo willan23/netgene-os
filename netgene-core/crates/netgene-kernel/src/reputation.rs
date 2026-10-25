@@ -145,7 +145,7 @@ pub fn compute(manifest: &AgentManifest, reviews: &[AgentReview], trusted: &[Hyb
             rejected += 1;
             continue;
         }
-        let keep = latest.get(&review.reviewer_gene_id).map_or(true, |prev| review.created_at > prev.created_at);
+        let keep = latest.get(&review.reviewer_gene_id).is_none_or(|prev| review.created_at > prev.created_at);
         if keep {
             latest.insert(review.reviewer_gene_id, review);
         }
@@ -153,7 +153,7 @@ pub fn compute(manifest: &AgentManifest, reviews: &[AgentReview], trusted: &[Hyb
 
     let (trusted_ratings, untrusted): (Vec<&&AgentReview>, Vec<&&AgentReview>) = latest
         .values()
-        .partition(|r| trusted.iter().any(|k| *k == r.reviewer_key));
+        .partition(|r| trusted.contains(&r.reviewer_key));
     let ratings: Vec<f64> = trusted_ratings.iter().map(|r| r.rating as f64).collect();
     let n = ratings.len() as f64;
     let sum: f64 = ratings.iter().sum();
@@ -198,7 +198,7 @@ impl ReviewStore {
         let mut reviews = vec![];
         for entry in std::fs::read_dir(agent_dir)?.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "json") {
+            if path.extension().is_some_and(|e| e == "json") {
                 if let Ok(review) = serde_json::from_str(&std::fs::read_to_string(&path)?) {
                     reviews.push(review);
                 }
