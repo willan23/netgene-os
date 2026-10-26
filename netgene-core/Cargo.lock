@@ -3332,7 +3332,7 @@ checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "netgene-cli"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3364,7 +3364,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-ebpf"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "aya",
@@ -3373,7 +3373,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-enterprise"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3392,7 +3392,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "android-native-keyring-store",
  "anyhow",
@@ -3416,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3445,7 +3445,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -3458,7 +3458,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-p2p"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3480,7 +3480,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3496,7 +3496,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-presence"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-safeguard"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3528,7 +3528,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-store"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3543,7 +3543,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-vault"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3561,7 +3561,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-wasm"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",

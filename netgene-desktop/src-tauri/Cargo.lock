@@ -2790,7 +2790,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-gene"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "android-native-keyring-store",
  "anyhow",
@@ -2813,7 +2813,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-kernel"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2839,7 +2839,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-llm"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "reqwest 0.12.28",
@@ -2852,7 +2852,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-policy"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-presence"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2884,7 +2884,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-safeguard"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2898,7 +2898,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-store"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2911,7 +2911,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-vault"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2928,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "netgene-wasm"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
