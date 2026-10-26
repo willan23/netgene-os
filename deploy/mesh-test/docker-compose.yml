@@ -1,0 +1,63 @@
+# Multi-node mesh test: two isolated networks joined only by a relay.
+#
+#   lan_a: node-a ── relay ── lan_b: node-c
+#
+# node-a and node-c cannot reach each other directly. The test (run.sh) checks
+# that C's encrypted gossip reaches A through the relay (sender key forwarded
+# by the relay), and that C reaches A privately through A's relay circuit.
+#
+# Test only: the passphrase below is public and the genes are throw-away.
+
+x-node: &node
+  image: netgene-os:mesh-test
+  build:
+    context: ../../netgene-core
+  environment:
+    NETGENE_SECRET_STORE: file
+    NETGENE_SECRET_PASSPHRASE: "mesh-test-only-passphrase"
+    RUST_LOG: info
+  volumes:
+    - genes:/home/netgene/.netgene
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
+services:
+  # One-off commands (gene init/spawn, peer-id); no network.
+  tools:
+    <<: *node
+    network_mode: none
+    profiles: [tools]
+
+  relay:
+    <<: *node
+    command: >-
+      p2p listen --gene ${RELAY_ID} --port 7777 --no-mdns --relay-server
+      --external-addr /ip4/172.29.1.10/tcp/7777 --external-addr /ip4/172.29.2.10/tcp/7777
+    networks:
+      lan_a: { ipv4_address: 172.29.1.10 }
+      lan_b: { ipv4_address: 172.29.2.10 }
+
+  node-a:
+    <<: *node
+    command: >-
+      p2p listen --gene ${A_ID} --port 7777 --no-mdns
+      --relay /ip4/172.29.1.10/tcp/7777/p2p/${RELAY_PEER}
+    networks:
+      lan_a: { ipv4_address: 172.29.1.20 }
+    depends_on: [relay]
+
+  # Started with `run` by the test.
+  node-c:
+    <<: *node
+    networks: [lan_b]
+    profiles: [tools]
+
+networks:
+  lan_a:
+    ipam: { config: [{ subnet: 172.29.1.0/24 }] }
+  lan_b:
+    ipam: { config: [{ subnet: 172.29.2.0/24 }] }
+
+volumes:
+  genes:

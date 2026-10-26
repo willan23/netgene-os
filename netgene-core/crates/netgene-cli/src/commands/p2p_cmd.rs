@@ -62,6 +62,11 @@ pub enum P2pCommand {
         #[arg(long)]
         private: Option<String>,
     },
+    /// Print the libp2p PeerId a gene runs as (derived from its public key)
+    PeerId {
+        #[arg(long)]
+        gene: String,
+    },
     /// Broadcast a message over the mesh (encrypted with this node's sender key)
     Broadcast {
         #[command(flatten)]
@@ -139,6 +144,15 @@ pub async fn run(cmd: P2pCommand) -> Result<()> {
             println!("   Dialing:  {}", multiaddr);
             println!();
 
+            // The private message is for the peer named at the end of the address
+            // (through a relay circuit, the relay's session comes up first).
+            let target = multiaddr.iter().filter_map(|p| match p {
+                libp2p::multiaddr::Protocol::P2p(id) => Some(id),
+                _ => None,
+            }).last();
+            if private.is_some() && target.is_none() {
+                anyhow::bail!("--private needs an address ending in /p2p/<PeerId>");
+            }
             node.dial(multiaddr)?;
             tokio::spawn(async move {
                 node.run().await;
@@ -148,12 +162,24 @@ pub async fn run(cmd: P2pCommand) -> Result<()> {
             let mut pending_private = private;
             while let Some(event) = in_rx.recv().await {
                 print_inbound(&event);
-                if let (Inbound::SessionEstablished { peer }, Some(text)) = (&event, pending_private.take()) {
-                    let msg = MeshMessage::IntentBroadcast { sender: sender.clone(), intent: text.clone(), timestamp: Utc::now() };
-                    out_tx.send(Outbound::Private { to: *peer, msg }).await?;
-                    println!("🔐 Sent private message to {}: \"{}\"", peer, text);
+                if let Inbound::SessionEstablished { peer } = &event {
+                    if Some(*peer) == target {
+                        if let Some(text) = pending_private.take() {
+                            let msg = MeshMessage::IntentBroadcast { sender: sender.clone(), intent: text.clone(), timestamp: Utc::now() };
+                            out_tx.send(Outbound::Private { to: *peer, msg }).await?;
+                            println!("🔐 Sent private message to {}: \"{}\"", peer, text);
+                        }
+                    }
                 }
             }
+        }
+
+        P2pCommand::PeerId { gene } => {
+            let record = list_genes(&default_gene_dir())?
+                .into_iter()
+                .find(|g| g.id.to_string() == gene)
+                .ok_or_else(|| anyhow::anyhow!("Gene {} not found", gene))?;
+            println!("{}", netgene_p2p::peer_id_for_gene(&record)?);
         }
 
         P2pCommand::Broadcast { identity, peer, port, msg } => {

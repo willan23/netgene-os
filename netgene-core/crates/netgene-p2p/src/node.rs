@@ -158,11 +158,12 @@ impl NetGeneP2PNode {
         let mdns = if config.mdns { Some(mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?) } else { None };
         let relay_server = config.relay_server.then(|| relay::Behaviour::new(peer_id, member_relay_config()));
 
-        // TCP + QUIC, Noise + Yamux, plus the relay client transport (`/p2p-circuit`).
+        // TCP + QUIC, Noise + Yamux, DNS names (`/dns4/…`), plus the relay client transport (`/p2p-circuit`).
         let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key.clone())
             .with_tokio()
             .with_tcp(tcp::Config::default().nodelay(true), noise::Config::new, yamux::Config::default)?
             .with_quic()
+            .with_dns()?
             .with_relay_client(noise::Config::new, yamux::Config::default)?
             .with_behaviour(|key, relay_client| NetGeneBehaviour {
                 gossipsub,

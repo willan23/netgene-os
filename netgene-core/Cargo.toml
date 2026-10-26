@@ -86,6 +86,7 @@ libp2p = { version = "0.57", features = [
     "relay",
     "dcutr",
     "autonat",
+    "dns",
 ] }
 
 # Internal crates

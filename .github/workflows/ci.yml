@@ -78,3 +78,10 @@ jobs:
           workspaces: netgene-desktop/src-tauri
       - run: cargo check
         working-directory: netgene-desktop/src-tauri
+
+  mesh:
+    name: Multi-node mesh (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash deploy/mesh-test/run.sh
