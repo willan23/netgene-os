@@ -51,16 +51,32 @@ pub struct Policy {
     /// Confirmations must carry a hardware user-presence proof (e.g. Windows Hello).
     #[serde(default)]
     pub require_user_presence: bool,
+    /// Sandbox permissions `agent.run` may grant (`log`, `io`, `kv`, `clock`).
+    #[serde(default = "default_agent_permissions")]
+    pub agent_permissions: Vec<String>,
 }
 
 fn default_max_nodes() -> u64 {
     10
 }
 
+fn default_agent_permissions() -> Vec<String> {
+    ["log", "io", "kv", "clock"].map(String::from).to_vec()
+}
+
+/// Largest `agent.run` input accepted.
+pub const MAX_AGENT_INPUT_BYTES: usize = 64 * 1024;
+
 impl Default for Policy {
     /// Reads are allowed, anything that changes state needs confirmation.
     fn default() -> Self {
-        Self { version: 1, rules: vec![], max_nodes_per_request: default_max_nodes(), require_user_presence: false }
+        Self {
+            version: 1,
+            rules: vec![],
+            max_nodes_per_request: default_max_nodes(),
+            require_user_presence: false,
+            agent_permissions: default_agent_permissions(),
+        }
     }
 }
 
@@ -153,6 +169,16 @@ impl PolicyEngine {
             }
         }
 
+        if action.kind == "agent.run" {
+            let input = action.params.get("input").and_then(|i| i.as_str()).unwrap_or_default();
+            if input.len() > MAX_AGENT_INPUT_BYTES {
+                return Decision::Deny { reason: format!("agent input larger than {} bytes", MAX_AGENT_INPUT_BYTES) };
+            }
+            if action.params.get("agent").and_then(|a| a.as_str()).is_none() {
+                return Decision::Deny { reason: "agent.run needs an 'agent' name".into() };
+            }
+        }
+
         let effect = self
             .policy
             .rules
@@ -205,17 +231,17 @@ mod tests {
         let engine = PolicyEngine::new(Policy::default());
         let obs = observer();
         assert_eq!(engine.evaluate(&obs, &Action::new("safeguard.scan", json!({}))), Decision::Allow);
-        assert!(matches!(engine.evaluate(&obs, &Action::new("network.optimize", json!({}))), Decision::Deny { .. }));
+        assert!(matches!(engine.evaluate(&obs, &Action::new("agent.run", json!({"agent": "x"}))), Decision::Deny { .. }));
     }
 
     #[test]
     fn test_granted_capability_allows() {
         let engine = PolicyEngine::new(Policy::default());
         let obs = observer();
-        let action = Action::new("network.optimize", json!({}));
+        let action = Action::new("agent.run", json!({"agent": "x"}));
         assert!(matches!(engine.evaluate(&obs, &action), Decision::Deny { .. }));
         assert!(matches!(
-            engine.evaluate_with_grants(&obs, &["network.admin".to_string()], &action),
+            engine.evaluate_with_grants(&obs, &["agent.run".to_string()], &action),
             Decision::Confirm { .. }
         ));
     }
@@ -235,6 +261,16 @@ mod tests {
             engine.evaluate(&master(), &Action::new("node.provision", json!({"count": 10_000}))),
             Decision::Deny { .. }
         ));
+    }
+
+    #[test]
+    fn test_agent_run_params_checked() {
+        let engine = PolicyEngine::new(Policy::default());
+        let m = master();
+        assert!(matches!(engine.evaluate(&m, &Action::new("agent.run", json!({}))), Decision::Deny { .. }));
+        let big = "x".repeat(MAX_AGENT_INPUT_BYTES + 1);
+        assert!(matches!(engine.evaluate(&m, &Action::new("agent.run", json!({"agent": "a", "input": big}))), Decision::Deny { .. }));
+        assert!(matches!(engine.evaluate(&m, &Action::new("agent.run", json!({"agent": "a"}))), Decision::Confirm { .. }));
     }
 
     #[test]

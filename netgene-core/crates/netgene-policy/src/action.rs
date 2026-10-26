@@ -27,10 +27,11 @@ pub struct ActionSpec {
 
 /// Every action the kernel can execute. Anything else is denied.
 pub const ACTION_CATALOG: &[ActionSpec] = &[
-    ActionSpec { kind: "system.status", capability: "network.read", risk: Risk::Read, description: "Report kernel and agent status" },
-    ActionSpec { kind: "safeguard.scan", capability: "network.read", risk: Risk::Read, description: "Run an anomaly scan" },
-    ActionSpec { kind: "network.optimize", capability: "network.admin", risk: Risk::Write, description: "Recompute routing preferences" },
-    ActionSpec { kind: "node.provision", capability: "node.spawn", risk: Risk::Write, description: "Provision new mesh nodes" },
+    ActionSpec { kind: "system.status", capability: "network.read", risk: Risk::Read, description: "Report kernel, gene, agent and store state" },
+    ActionSpec { kind: "safeguard.scan", capability: "network.read", risk: Risk::Read, description: "Sample host metrics into the anomaly detector" },
+    ActionSpec { kind: "node.provision", capability: "node.spawn", risk: Risk::Write, description: "Create node sub-genes of the operator" },
+    ActionSpec { kind: "agent.list", capability: "network.read", risk: Risk::Read, description: "List installed WASM agents" },
+    ActionSpec { kind: "agent.run", capability: "agent.run", risk: Risk::Write, description: "Run an installed, signed WASM agent in the sandbox" },
 ];
 
 impl ActionSpec {
@@ -56,9 +57,10 @@ impl Action {
     pub fn from_llm_intent(name: &str, params: serde_json::Value) -> Option<Self> {
         let kind = match name {
             "provision_nodes" => "node.provision",
-            "optimize_network" => "network.optimize",
             "trigger_anomaly_scan" => "safeguard.scan",
             "system_status" => "system.status",
+            "list_agents" => "agent.list",
+            "run_agent" => "agent.run",
             _ => return None,
         };
         Some(Self::new(kind, params))
@@ -75,10 +77,11 @@ mod tests {
 
     #[test]
     fn test_llm_intents_map_to_catalog() {
-        for name in ["provision_nodes", "optimize_network", "trigger_anomaly_scan", "system_status"] {
+        for name in ["provision_nodes", "trigger_anomaly_scan", "system_status", "list_agents", "run_agent"] {
             let action = Action::from_llm_intent(name, serde_json::json!({})).unwrap();
             assert!(action.spec().is_some(), "{name} must map to a catalog action");
         }
         assert!(Action::from_llm_intent("rm_rf", serde_json::json!({})).is_none());
+        assert!(Action::from_llm_intent("optimize_network", serde_json::json!({})).is_none(), "no executor, not in the catalog");
     }
 }

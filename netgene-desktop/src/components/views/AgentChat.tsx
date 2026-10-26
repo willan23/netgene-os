@@ -85,7 +85,7 @@ export function AgentChat({ agent, onClose }: Props) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Send command or query to BDI agent..."
+            placeholder="Ask the assistant about this agent..."
             className="flex-1 bg-black/50 border border-slate-600 rounded px-4 py-2 text-white font-mono text-sm focus:outline-none focus:border-fuchsia-500"
             disabled={loading}
           />

@@ -1,26 +1,28 @@
-//! NetSphere Kernel — the main orchestrator.
+//! NetSphere Kernel — turns intents into policy-checked, audited actions.
 //!
-//! Spawns and manages agents, routes intents, and maintains kernel state.
+//! The LLM (or the rule-based fallback) proposes an action from the catalog;
+//! the policy engine decides whether it runs now, waits for human
+//! confirmation, or is denied; an [`Executor`] performs it and the result is
+//! returned and audited.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinHandle;
+use tokio::sync::Mutex;
 use anyhow::Result;
 use serde::Serialize;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::agent::{
-    Agent, AgentId, AgentInfo, AgentMessage, MessageKind,
-    BuilderAgent, MonitorAgent, OptimizerAgent, NetworkAgent, EvolutionAgent,
-};
-use crate::bus::MessageBus;
+use crate::agent::{AgentInfo, AgentStatus};
+use crate::executor::{Executor, Workspace};
 use netgene_gene::{crypto::GeneKeyPair, NetGene};
 use netgene_llm::{LlmIntentEngine, OllamaClient};
 use netgene_policy::{Action, AuditEntry, AuditLog, AuditRecord, Decision, Grant, Policy, PolicyEngine};
 use crate::memory::KernelMemory;
+
+/// Longest result kept in an audit record's detail.
+const AUDIT_RESULT_CHARS: usize = 512;
 
 /// Who the kernel acts as, which policy it enforces and where it audits.
 pub struct KernelConfig {
@@ -34,13 +36,26 @@ pub struct KernelConfig {
     pub grants: Vec<Grant>,
     /// Enrolled hardware user-presence key (PKCS#1 RSA public key), if any.
     pub presence_key: Option<Vec<u8>>,
+    /// Enrolled WebAuthn passkeys of the operator (another presence factor).
+    pub passkeys: Vec<netgene_presence::webauthn::PasskeyCredential>,
+    /// Where actions persist what they create.
+    pub workspace: Workspace,
 }
 
 impl KernelConfig {
-    /// Throw-away Master Gene, default policy, in-memory audit (tests, demos).
+    /// Throw-away Master Gene, default policy, nothing on disk (tests, demos).
     pub fn ephemeral() -> Result<Self> {
         let (operator, operator_kp) = NetGene::generate_master("ephemeral-operator")?;
-        Ok(Self { operator, operator_kp, policy: Policy::default(), audit_path: None, grants: vec![], presence_key: None })
+        Ok(Self {
+            operator,
+            operator_kp,
+            policy: Policy::default(),
+            audit_path: None,
+            grants: vec![],
+            presence_key: None,
+            passkeys: vec![],
+            workspace: Workspace::ephemeral()?,
+        })
     }
 }
 
@@ -48,7 +63,7 @@ impl KernelConfig {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum DispatchOutcome {
-    Executed { action: Action, explanation: String },
+    Executed { action: Action, explanation: String, result: serde_json::Value },
     PendingConfirmation { proposal_id: Uuid, action: Action, reason: String, explanation: String },
     Denied { action: Option<Action>, reason: String, explanation: String },
 }
@@ -57,8 +72,8 @@ impl DispatchOutcome {
     /// One-line human summary.
     pub fn summary(&self) -> String {
         match self {
-            DispatchOutcome::Executed { action, explanation } =>
-                format!("✅ Action dispatched: {}\n🧠 {}", action.kind, explanation),
+            DispatchOutcome::Executed { action, explanation, result } =>
+                format!("✅ Executed: {}\n🧠 {}\n{}", action.kind, explanation, serde_json::to_string_pretty(result).unwrap_or_default()),
             DispatchOutcome::PendingConfirmation { proposal_id, action, reason, .. } =>
                 format!("⏸️ Confirmation required for {} ({}). Proposal: {}", action.kind, reason, proposal_id),
             DispatchOutcome::Denied { reason, .. } => format!("⛔ Denied by policy: {}", reason),
@@ -68,10 +83,6 @@ impl DispatchOutcome {
 
 /// The Netsphere Kernel state.
 pub struct NetSphereKernel {
-    /// Bus sender — use this to inject messages.
-    bus_tx: mpsc::Sender<AgentMessage>,
-    /// Agent registry: id → info snapshot.
-    agents: Arc<Mutex<HashMap<AgentId, AgentInfo>>>,
     /// Kernel memory.
     pub memory: Arc<Mutex<KernelMemory>>,
     operator: NetGene,
@@ -81,8 +92,11 @@ pub struct NetSphereKernel {
     pending: Mutex<HashMap<Uuid, (String, Action)>>,
     grants: Vec<Grant>,
     presence_key: Option<Vec<u8>>,
-    /// Running agent task handles.
-    _task_handles: Vec<JoinHandle<()>>,
+    passkeys: Mutex<Vec<netgene_presence::webauthn::PasskeyCredential>>,
+    executor: Mutex<Executor>,
+    /// Marketplace manifests installed through [`Self::inject_marketplace_agent`].
+    marketplace_agents: Mutex<Vec<AgentInfo>>,
+    booted_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl NetSphereKernel {
@@ -91,92 +105,26 @@ impl NetSphereKernel {
         Self::boot_with(KernelConfig::ephemeral()?).await
     }
 
-    /// Boot the kernel: create agents, wire the bus, start tasks.
     pub async fn boot_with(config: KernelConfig) -> Result<Self> {
-        info!("🧬 Netsphere Kernel booting (5 core agents)...");
+        let executor_kp = config.operator_kp.try_clone()?;
         let audit = match config.audit_path {
             Some(path) => AuditLog::open(path, config.operator_kp)?,
             None => AuditLog::in_memory(config.operator_kp),
         };
-
-        let mut bus = MessageBus::new();
-        let agents_map: Arc<Mutex<HashMap<AgentId, AgentInfo>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let memory = Arc::new(Mutex::new(KernelMemory::new()));
-        let bus_tx = bus.sender();
-        let mut handles = vec![];
-
-        // 1. Builder Agent
-        let mut builder = BuilderAgent::new();
-        let builder_id = builder.id();
-        let (b_rx, b_tx) = bus.register_agent(builder_id);
-        agents_map.lock().await.insert(builder_id, builder.info());
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = builder.run(b_rx, b_tx).await {
-                warn!(err = %e, "BuilderAgent crashed");
-            }
-        }));
-
-        // 2. Monitor Agent
-        let mut monitor = MonitorAgent::new();
-        let monitor_id = monitor.id();
-        let (m_rx, m_tx) = bus.register_agent(monitor_id);
-        agents_map.lock().await.insert(monitor_id, monitor.info());
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = monitor.run(m_rx, m_tx).await {
-                warn!(err = %e, "MonitorAgent crashed");
-            }
-        }));
-
-        // 3. Optimizer Agent
-        let mut optimizer = OptimizerAgent::new();
-        let optimizer_id = optimizer.id();
-        let (o_rx, o_tx) = bus.register_agent(optimizer_id);
-        agents_map.lock().await.insert(optimizer_id, optimizer.info());
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = optimizer.run(o_rx, o_tx).await {
-                warn!(err = %e, "OptimizerAgent crashed");
-            }
-        }));
-
-        // 4. Network Agent (Phase 2)
-        let mut network_agent = NetworkAgent::new();
-        let network_id = network_agent.id();
-        let (n_rx, n_tx) = bus.register_agent(network_id);
-        agents_map.lock().await.insert(network_id, network_agent.info());
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = network_agent.run(n_rx, n_tx).await {
-                warn!(err = %e, "NetworkAgent crashed");
-            }
-        }));
-
-        // 5. Evolution Agent (Phase 2)
-        let mut evo_agent = EvolutionAgent::new();
-        let evo_id = evo_agent.id();
-        let (e_rx, e_tx) = bus.register_agent(evo_id);
-        agents_map.lock().await.insert(evo_id, evo_agent.info());
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = evo_agent.run(e_rx, e_tx).await {
-                warn!(err = %e, "EvolutionAgent crashed");
-            }
-        }));
-
-        // Start message bus router
-        tokio::spawn(async move { bus.run().await });
-
-        info!("✅ Netsphere Kernel online with 5 agents (Builder, Monitor, Optimizer, Network, Evolution)");
+        info!("✅ Netsphere Kernel online as {} ({})", config.operator.name, config.operator.short_fp);
 
         Ok(Self {
-            bus_tx,
-            agents: agents_map,
-            memory,
+            memory: Arc::new(Mutex::new(KernelMemory::new())),
+            executor: Mutex::new(Executor::new(config.workspace, config.operator.clone(), executor_kp)),
             operator: config.operator,
             policy: PolicyEngine::new(config.policy),
             audit: Mutex::new(audit),
             pending: Mutex::new(HashMap::new()),
             grants: config.grants,
             presence_key: config.presence_key,
-            _task_handles: handles,
+            passkeys: Mutex::new(config.passkeys),
+            marketplace_agents: Mutex::new(vec![]),
+            booted_at: chrono::Utc::now(),
         })
     }
 
@@ -207,12 +155,15 @@ impl NetSphereKernel {
             self.audit(input, None, "deny", &reason).await?;
             return Ok(DispatchOutcome::Denied { action: None, reason, explanation });
         };
+        self.propose_action(input, action, explanation).await
+    }
 
+    /// Submit an already structured action (CLI, API) through the same policy path.
+    pub async fn propose_action(&self, input: &str, action: Action, explanation: String) -> Result<DispatchOutcome> {
         match self.evaluate(&action) {
             Decision::Allow => {
                 self.audit(input, Some(&action), "allow", "").await?;
-                self.execute(input, &action).await?;
-                Ok(DispatchOutcome::Executed { action, explanation })
+                self.execute(input, action, explanation).await
             }
             Decision::Confirm { reason } => {
                 self.audit(input, Some(&action), "confirm", &reason).await?;
@@ -268,6 +219,49 @@ impl NetSphereKernel {
         self.confirm_inner(proposal_id, format!("proposal {} (user presence verified)", proposal_id)).await
     }
 
+    /// `navigator.credentials.get` options whose challenge binds `proposal_id`.
+    pub async fn passkey_request(&self, proposal_id: Uuid, rp_id: &str) -> Result<serde_json::Value> {
+        let passkeys = self.passkeys.lock().await;
+        if passkeys.is_empty() {
+            anyhow::bail!("No passkey enrolled for the operator");
+        }
+        let challenge = self.presence_challenge(proposal_id).await?;
+        Ok(netgene_presence::webauthn::request_options(&passkeys, &challenge, rp_id))
+    }
+
+    /// Human approval backed by a WebAuthn assertion over the proposal's
+    /// challenge, made on `origin`. Returns the outcome and the passkeys with
+    /// their updated signature counters (to persist).
+    pub async fn confirm_with_passkey(
+        &self,
+        proposal_id: Uuid,
+        assertion: &netgene_presence::webauthn::AssertionResponse,
+        origin: &str,
+    ) -> Result<(DispatchOutcome, Vec<netgene_presence::webauthn::PasskeyCredential>)> {
+        let challenge = self.presence_challenge(proposal_id).await?;
+        let verified = {
+            let passkeys = self.passkeys.lock().await;
+            netgene_presence::webauthn::verify_assertion(&passkeys, assertion, &challenge, origin)
+        };
+        let (index, count) = match verified {
+            Ok(v) => v,
+            Err(e) => {
+                let pending = self.pending.lock().await;
+                if let Some((input, action)) = pending.get(&proposal_id) {
+                    self.audit(input, Some(action), "presence_failed", &format!("proposal {} (passkey: {})", proposal_id, e)).await?;
+                }
+                return Err(e.context(format!("Passkey approval refused for proposal {}", proposal_id)));
+            }
+        };
+        let updated = {
+            let mut passkeys = self.passkeys.lock().await;
+            passkeys[index].sign_count = count;
+            passkeys.clone()
+        };
+        let outcome = self.confirm_inner(proposal_id, format!("proposal {} (passkey verified)", proposal_id)).await?;
+        Ok((outcome, updated))
+    }
+
     async fn confirm_inner(&self, proposal_id: Uuid, detail: String) -> Result<DispatchOutcome> {
         let (input, action) = self
             .pending
@@ -283,8 +277,7 @@ impl NetSphereKernel {
         }
 
         self.audit(&input, Some(&action), "confirmed", &detail).await?;
-        self.execute(&input, &action).await?;
-        Ok(DispatchOutcome::Executed { action, explanation: "confirmed by operator".to_string() })
+        self.execute(&input, action, "confirmed by operator".to_string()).await
     }
 
     /// Discard a pending proposal.
@@ -321,14 +314,19 @@ impl NetSphereKernel {
         self.audit.lock().await.entries()
     }
 
-    /// The policy currently enforced.
     /// The Gene the kernel acts as.
     pub fn operator(&self) -> &NetGene {
         &self.operator
     }
 
+    /// The policy currently enforced.
     pub fn policy(&self) -> &Policy {
         self.policy.policy()
+    }
+
+    /// Feed a metric sample (desktop telemetry, eBPF counters) to the anomaly detector.
+    pub async fn observe_metric(&self, metric: &str, value: f64) -> Option<netgene_safeguard::AnomalyEvent> {
+        self.executor.lock().await.observe(metric, value)
     }
 
     async fn audit(&self, input: &str, action: Option<&Action>, decision: &str, detail: &str) -> Result<()> {
@@ -343,62 +341,78 @@ impl NetSphereKernel {
         Ok(())
     }
 
-    /// Translate an approved catalog action into agent messages.
-    async fn execute(&self, input: &str, action: &Action) -> Result<()> {
-        let msg = match action.kind.as_str() {
-            "node.provision" => {
-                let count = action.params.get("count").and_then(|c| c.as_u64()).unwrap_or(1);
-                AgentMessage::new(None, None, MessageKind::Intent, serde_json::json!({ "action": "spawn_node", "count": count }))
+    /// Run an approved catalog action; failures are audited and reported.
+    async fn execute(&self, input: &str, action: Action, explanation: String) -> Result<DispatchOutcome> {
+        let result = {
+            let mut executor = self.executor.lock().await;
+            match action.kind.as_str() {
+                "system.status" => executor.status(serde_json::json!({
+                    "uptime_seconds": (chrono::Utc::now() - self.booted_at).num_seconds(),
+                    "pending_proposals": self.pending.lock().await.len(),
+                    "audit_entries": self.audit.lock().await.entries()?.len(),
+                    "require_user_presence": self.requires_user_presence(),
+                })),
+                "safeguard.scan" => executor.scan().await,
+                "node.provision" => executor.provision(&action.params),
+                "agent.list" => executor.list_agents(),
+                "agent.run" => executor.run_agent(&action.params, &self.policy.policy().agent_permissions).await,
+                other => Err(anyhow::anyhow!("No executor for action '{}'", other)),
             }
-            "network.optimize" => {
-                AgentMessage::new(None, None, MessageKind::Intent, serde_json::json!({ "action": "optimize_routes" }))
-            }
-            "system.status" => AgentMessage::new(None, None, MessageKind::Heartbeat, serde_json::json!({})),
-            "safeguard.scan" => AgentMessage::new(
-                None, None, MessageKind::Alert,
-                serde_json::json!({ "message": "Anomaly scan requested by operator" }),
-            ),
-            other => anyhow::bail!("No executor for action '{}'", other),
         };
-        self.bus_tx.send(msg).await?;
-        self.audit(input, Some(action), "executed", "").await
-    }
-
-    pub async fn dispatch_swarm_sync(&self) -> Result<usize> {
-        info!("🐝 Iniciando Federated Swarm Sync...");
-        let msg = AgentMessage::new(None, None, MessageKind::SwarmSync, serde_json::json!({}));
-        self.bus_tx.send(msg).await?;
-        
-        let mut mem = self.memory.lock().await;
-        mem.log_event("Federated Swarm Sync Initiated".to_string());
-        
-        Ok(self.agents.lock().await.len())
+        match result {
+            Ok(result) => {
+                let mut summary = result.to_string();
+                if summary.chars().count() > AUDIT_RESULT_CHARS {
+                    summary = summary.chars().take(AUDIT_RESULT_CHARS).collect::<String>() + "…";
+                }
+                self.audit(input, Some(&action), "executed", &summary).await?;
+                self.memory.lock().await.log_event(format!("Executed {}", action.kind));
+                Ok(DispatchOutcome::Executed { action, explanation, result })
+            }
+            Err(e) => {
+                self.audit(input, Some(&action), "failed", &e.to_string()).await?;
+                Err(e.context(format!("{} failed", action.kind)))
+            }
+        }
     }
 
     pub async fn inject_marketplace_agent(&self, id: String, name: String) {
-        let agent_id = uuid::Uuid::new_v4();
-        let info = AgentInfo {
-            id: agent_id,
+        self.marketplace_agents.lock().await.push(AgentInfo {
+            id: Uuid::new_v4(),
             name,
             agent_type: id,
-            status: crate::agent::AgentStatus::Idle,
+            status: AgentStatus::Idle,
             messages_processed: 0,
             started_at: chrono::Utc::now(),
-        };
-        self.agents.lock().await.insert(agent_id, info);
+        });
     }
 
-    /// Get snapshot of all agent infos.
+    /// Installed WASM agents and marketplace manifests.
     pub async fn agent_list(&self) -> Vec<AgentInfo> {
-        let map = self.agents.lock().await;
-        map.values().cloned().collect()
+        let mut agents = self.marketplace_agents.lock().await.clone();
+        let listed = self.executor.lock().await.list_agents().unwrap_or_default();
+        for agent in listed["agents"].as_array().into_iter().flatten() {
+            agents.push(AgentInfo {
+                id: Uuid::new_v5(&Uuid::NAMESPACE_OID, agent["name"].as_str().unwrap_or_default().as_bytes()),
+                name: agent["name"].as_str().unwrap_or_default().to_string(),
+                agent_type: "wasm".into(),
+                status: if agent["trusted"].as_bool() == Some(true) { AgentStatus::Idle } else { AgentStatus::Error("untrusted author".into()) },
+                messages_processed: 0,
+                started_at: self.booted_at,
+            });
+        }
+        agents
     }
 
-    /// Graceful shutdown.
+    /// Install a signed WASM agent authored by the operator's lineage.
+    pub async fn install_wasm_agent(&self, module: &netgene_wasm::GeneModule) -> Result<PathBuf> {
+        let executor = self.executor.lock().await;
+        crate::executor::install_agent(&executor.workspace, &executor.trusted_authors()?, module)
+    }
+
+    /// Graceful shutdown (nothing runs in the background any more).
     pub async fn shutdown(&self) -> Result<()> {
         info!("Netsphere Kernel shutting down...");
-        let msg = AgentMessage::new(None, None, MessageKind::Shutdown, serde_json::json!({}));
-        self.bus_tx.send(msg).await?;
         Ok(())
     }
 }

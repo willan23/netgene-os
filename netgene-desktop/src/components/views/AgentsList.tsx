@@ -24,23 +24,20 @@ export function AgentsList() {
 
   const getAgentDesc = (type: string) => {
     switch(type) {
-      case 'monitor': return 'Monitors network anomalies and logs traffic patterns.';
-      case 'builder': return 'Provisions new nodes and manages topology expansion.';
-      case 'optimizer': return 'Suggests routing and resource optimizations.';
-      case 'network': return 'Ensures connectivity and peer-to-peer resilience.';
-      case 'evolution': return 'Manages self-healing protocols and system updates.';
-      case 'deepseek-coder-bdi': return 'Autonomous coding & vulnerability patch agent powered by DeepSeek.';
-      case 'sentinel-guard-v2': return 'Zero-Trust network observer & Z-Score anomaly healer.';
-      case 'swarm-coordinator': return 'Orchestrates distributed federated learning across nodes.';
-      default: return 'Custom BDI autonomous agent installed from NetGene Marketplace.';
+      case 'wasm': return 'Signed WebAssembly agent. Runs in the sandbox through the agent.run action, with the permissions the policy grants.';
+      default: return 'Signed marketplace manifest (description only, no code attached).';
     }
   };
+
+  // Rust enums serialize as "Idle" or {"Error": "..."}.
+  const statusText = (status: unknown) =>
+    typeof status === 'string' ? status : Object.entries(status as Record<string, string>).map(([k, v]) => `${k}: ${v}`).join(', ');
 
   return (
     <div className="flex-1 flex flex-col gap-6 w-full h-full animate-fade-in">
       <h2 className="text-2xl font-bold uppercase tracking-widest text-shadow-neon flex items-center gap-3">
         <Bot className="text-fuchsia-400" />
-        Belief-Desire-Intention (BDI) Agents
+        Agents
       </h2>
 
       <div className="border border-cyan-neon/30 bg-black/50 rounded-xl flex-1 shadow-[0_0_20px_rgba(0,255,255,0.1)] overflow-hidden flex flex-col">
@@ -74,7 +71,7 @@ export function AgentsList() {
                     <td className="p-4 uppercase">{agent.agent_type}</td>
                     <td className={`p-4 flex items-center gap-2 ${statusColor} uppercase`}>
                       <Activity size={14} className={isIdle ? '' : 'animate-pulse'} />
-                      {agent.status}
+                      {statusText(agent.status)}
                     </td>
                     <td className="p-4">
                       <div className="flex items-center gap-2">

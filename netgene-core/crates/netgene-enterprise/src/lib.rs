@@ -1,7 +1,8 @@
 //! # NetGene Enterprise
 //!
 //! Binds a corporate identity (an OpenID Connect ID token from Okta, Entra ID,
-//! Keycloak, Google Workspace…) to NetGene capabilities. The token is
+//! Keycloak, Google Workspace…, or a SAML 2.0 response with the `saml`
+//! feature) to NetGene capabilities. The token is
 //! verified against the IdP's JWKS; its group/role claim is mapped to
 //! capabilities through `~/.netgene/enterprise.json`; the caller then issues
 //! a time-limited [capability token](netgene_gene::CapabilityToken).
@@ -12,8 +13,12 @@
 //! - `iss` must match exactly, `aud` must contain the configured client id,
 //!   `exp`/`nbf` are checked with 60 s of clock leeway.
 
+#[cfg(feature = "saml")]
+pub mod saml;
+
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::future::Future;
+use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64URL, Engine};
 use chrono::{DateTime, TimeZone, Utc};
@@ -26,7 +31,7 @@ const LEEWAY_SECS: i64 = 60;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JwksSource {
-    /// `https://…/jwks` (fetched at verification time).
+    /// `https://…/jwks` (fetched on demand and cached, see [`JwksCache`]).
     Url(String),
     /// Local copy of the JWKS (air-gapped deployments, tests).
     File(String),
@@ -96,14 +101,115 @@ impl JwkSet {
     pub async fn load(source: &JwksSource) -> Result<Self> {
         match source {
             JwksSource::File(path) => Ok(serde_json::from_str(&std::fs::read_to_string(path)?)?),
-            JwksSource::Url(url) => {
-                if !url.starts_with("https://") {
-                    anyhow::bail!("JWKS URL must use https://");
-                }
-                Ok(reqwest::get(url).await?.error_for_status()?.json().await?)
-            }
+            JwksSource::Url(url) => Self::fetch(url.clone()).await,
         }
     }
+
+    /// Download a JWKS over HTTPS.
+    pub async fn fetch(url: String) -> Result<Self> {
+        if !url.starts_with("https://") {
+            anyhow::bail!("JWKS URL must use https://");
+        }
+        Ok(reqwest::get(&url).await?.error_for_status()?.json().await?)
+    }
+
+    fn has_kid(&self, kid: &str) -> bool {
+        self.keys.iter().any(|k| k.kid.as_deref() == Some(kid))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedJwks {
+    url: String,
+    fetched_at: DateTime<Utc>,
+    jwks: JwkSet,
+}
+
+/// On-disk cache of a remote JWKS (`~/.netgene/jwks-cache.json`).
+///
+/// - a cached set younger than `ttl` is used without network access;
+/// - a token whose `kid` is not in the cache (IdP key rotation) forces a
+///   refetch, at most once per `min_refetch`, so bogus tokens cannot hammer the IdP;
+/// - when the IdP is unreachable, a cache younger than `max_stale` is still used.
+///
+/// The cache holds only public keys, but it decides which keys are trusted, so
+/// it lives next to `enterprise.json` and shares its trust boundary.
+pub struct JwksCache {
+    path: PathBuf,
+    pub ttl: chrono::Duration,
+    pub max_stale: chrono::Duration,
+    pub min_refetch: chrono::Duration,
+}
+
+impl JwksCache {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            ttl: chrono::Duration::hours(1),
+            max_stale: chrono::Duration::hours(24),
+            min_refetch: chrono::Duration::seconds(60),
+        }
+    }
+
+    fn read(&self, url: &str) -> Option<CachedJwks> {
+        let cached: CachedJwks = serde_json::from_str(&std::fs::read_to_string(&self.path).ok()?).ok()?;
+        (cached.url == url).then_some(cached)
+    }
+
+    fn write(&self, cached: &CachedJwks) -> Result<()> {
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = self.path.with_extension("tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(cached)?)?;
+        std::fs::rename(&tmp, &self.path)?;
+        Ok(())
+    }
+
+    /// Verify `token`, fetching the JWKS through `fetch` only when needed.
+    pub async fn verify<F, Fut>(&self, config: &OidcConfig, token: &str, now: DateTime<Utc>, fetch: F) -> Result<VerifiedIdentity>
+    where
+        F: Fn(String) -> Fut,
+        Fut: Future<Output = Result<JwkSet>>,
+    {
+        let url = match &config.jwks {
+            JwksSource::File(_) => return verify_id_token(config, &JwkSet::load(&config.jwks).await?, token, now),
+            JwksSource::Url(url) => url.clone(),
+        };
+        let kid = token_kid(token)?;
+        let cached = self.read(&url);
+        let age = |c: &CachedJwks| now - c.fetched_at;
+
+        let usable = match &cached {
+            Some(c) if age(c) < self.ttl && (c.jwks.has_kid(&kid) || age(c) < self.min_refetch) => Some(&c.jwks),
+            _ => None,
+        };
+        if let Some(jwks) = usable {
+            return verify_id_token(config, jwks, token, now);
+        }
+
+        match fetch(url.clone()).await {
+            Ok(jwks) => {
+                let fresh = CachedJwks { url, fetched_at: now, jwks };
+                if let Err(e) = self.write(&fresh) {
+                    tracing::warn!("Could not write JWKS cache {:?}: {}", self.path, e);
+                }
+                verify_id_token(config, &fresh.jwks, token, now)
+            }
+            Err(e) => match cached {
+                Some(c) if age(&c) < self.max_stale => {
+                    tracing::warn!("JWKS fetch failed ({}); using cached keys from {}", e, c.fetched_at);
+                    verify_id_token(config, &c.jwks, token, now)
+                }
+                _ => Err(e.context("JWKS fetch failed and no usable cache")),
+            },
+        }
+    }
+}
+
+fn token_kid(token: &str) -> Result<String> {
+    let header: Header = decode_part(token.split('.').next().unwrap_or_default())?;
+    header.kid.context("ID token has no kid")
 }
 
 /// The identity asserted by a verified ID token.
@@ -214,13 +320,12 @@ pub fn verify_id_token(config: &OidcConfig, jwks: &JwkSet, token: &str, now: Dat
 
 /// Capabilities granted by the identity's roles (deduplicated, sorted).
 pub fn capabilities_for(config: &OidcConfig, identity: &VerifiedIdentity) -> Vec<String> {
-    let mut caps: Vec<String> = identity
-        .roles
-        .iter()
-        .filter_map(|r| config.role_capabilities.get(r))
-        .flatten()
-        .cloned()
-        .collect();
+    map_roles(&config.role_capabilities, &identity.roles)
+}
+
+/// Union of the capabilities mapped to `roles`, sorted.
+pub fn map_roles(role_capabilities: &BTreeMap<String, Vec<String>>, roles: &[String]) -> Vec<String> {
+    let mut caps: Vec<String> = roles.iter().filter_map(|r| role_capabilities.get(r)).flatten().cloned().collect();
     caps.sort();
     caps.dedup();
     caps
@@ -370,6 +475,60 @@ mod tests {
         key.sign(&RSA_PKCS1_SHA256, &SystemRandom::new(), signed.as_bytes(), &mut sig).unwrap();
         let jwt = format!("{}.{}", signed, B64URL.encode(sig));
         assert_eq!(verify_id_token(&config(), &jwks, &jwt, Utc::now()).unwrap().subject, "user-123");
+    }
+
+    fn url_config() -> OidcConfig {
+        OidcConfig { jwks: JwksSource::Url("https://idp.example.com/jwks".into()), ..config() }
+    }
+
+    #[tokio::test]
+    async fn test_jwks_cache_fetches_once_then_on_rotation() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let cache = JwksCache::new(dir.path().join("jwks-cache.json"));
+        let idp = idp();
+        let calls = AtomicUsize::new(0);
+        let served = std::sync::Mutex::new(idp.jwks.clone());
+        let fetch = |_url: String| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let jwks = served.lock().unwrap().clone();
+            async move { Ok(jwks) }
+        };
+        let now = Utc::now();
+        let tok = token(&idp, header(), claims(3600));
+        cache.verify(&url_config(), &tok, now, fetch).await.unwrap();
+        cache.verify(&url_config(), &tok, now + chrono::Duration::minutes(5), fetch).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "second verification uses the cache");
+
+        // The IdP rotates to a new key `k2`: the unknown kid forces one refetch.
+        let mut rotated = super::tests::idp();
+        rotated.jwks.keys[0].kid = Some("k2".into());
+        *served.lock().unwrap() = rotated.jwks.clone();
+        let tok2 = token(&rotated, serde_json::json!({"alg": "ES256", "kid": "k2"}), claims(3600));
+        cache.verify(&url_config(), &tok2, now + chrono::Duration::minutes(6), fetch).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        // The old key is gone from the IdP, so tokens signed with it are refused.
+        assert!(cache.verify(&url_config(), &tok, now + chrono::Duration::minutes(6), fetch).await.is_err());
+
+        // Unknown kids right after a fetch do not trigger another one.
+        let bogus = token(&rotated, serde_json::json!({"alg": "ES256", "kid": "zzz"}), claims(3600));
+        assert!(cache.verify(&url_config(), &bogus, now + chrono::Duration::minutes(6), fetch).await.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn test_jwks_cache_survives_idp_outage_until_max_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = JwksCache::new(dir.path().join("jwks-cache.json"));
+        let idp = idp();
+        let jwks = idp.jwks.clone();
+        let now = Utc::now();
+        let tok = token(&idp, header(), claims(30 * 3600));
+        cache.verify(&url_config(), &tok, now, |_| { let j = jwks.clone(); async move { Ok(j) } }).await.unwrap();
+
+        let down = |_url: String| async { Err::<JwkSet, _>(anyhow::anyhow!("connection refused")) };
+        cache.verify(&url_config(), &tok, now + chrono::Duration::hours(3), down).await.expect("stale cache used during outage");
+        assert!(cache.verify(&url_config(), &tok, now + chrono::Duration::hours(25), down).await.is_err());
     }
 
     #[tokio::test]

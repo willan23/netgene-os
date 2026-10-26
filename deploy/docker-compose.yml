@@ -13,7 +13,7 @@ services:
   netgene:
     build:
       context: ../netgene-core
-    image: netgene-os:0.8.0
+    image: netgene-os:0.9.0
     restart: unless-stopped
     environment:
       NETGENE_SECRET_STORE: file

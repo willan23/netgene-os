@@ -1,0 +1,56 @@
+[package]
+name = "netgene-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Separate workspace: fuzzing needs nightly and libFuzzer, the main build does not.
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+serde_json = "1"
+chrono = "0.4"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+libp2p = { version = "0.57", default-features = false }
+ring = "0.17"
+netgene-gene = { path = "../crates/netgene-gene" }
+netgene-p2p = { path = "../crates/netgene-p2p" }
+netgene-presence = { path = "../crates/netgene-presence" }
+netgene-enterprise = { path = "../crates/netgene-enterprise" }
+netgene-policy = { path = "../crates/netgene-policy" }
+netgene-wasm = { path = "../crates/netgene-wasm" }
+
+[[bin]]
+name = "webauthn"
+path = "fuzz_targets/webauthn.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "p2p_messages"
+path = "fuzz_targets/p2p_messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "oidc_token"
+path = "fuzz_targets/oidc_token.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "signed_records"
+path = "fuzz_targets/signed_records.rs"
+test = false
+doc = false
+bench = false

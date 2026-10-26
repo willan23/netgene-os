@@ -101,7 +101,7 @@ export function MarketplaceView() {
             <div className="mb-6 flex justify-between items-start">
                 <div>
                     <h1 className="text-2xl font-bold text-white mb-2 flex items-center">
-                        <Globe className="mr-3 text-cyan-400" /> BDI Agent Marketplace
+                        <Globe className="mr-3 text-cyan-400" /> Agent Marketplace
                     </h1>
                     <p className="text-slate-400">Expand your NetSphere Kernel with specialized autonomous agents.</p>
                 </div>

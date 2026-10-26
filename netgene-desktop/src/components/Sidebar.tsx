@@ -14,7 +14,7 @@ const navItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'safeguard', label: 'Safeguard', icon: ShieldAlert },
   { id: 'topology', label: 'Network Topology', icon: Share2 },
-  { id: 'agents', label: 'BDI Agents', icon: Bot },
+  { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'marketplace', label: 'Gene Market', icon: ShoppingCart },
   { id: 'vault', label: 'Personal Vault', icon: Lock },
 ];

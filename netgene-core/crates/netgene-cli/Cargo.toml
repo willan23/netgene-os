@@ -4,11 +4,16 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+publish.workspace = true
 description = "NetGene CLI — Main entry point and command interface"
 
 [[bin]]
 name = "netgene"
 path = "src/main.rs"
+
+[features]
+# SAML 2.0 grants (`gene grant-saml`); needs libxml2, xmlsec1 and OpenSSL.
+saml = ["netgene-enterprise/saml"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -23,6 +28,8 @@ netgene-gene = { workspace = true }
 netgene-kernel = { workspace = true }
 netgene-policy = { workspace = true }
 netgene-presence = { workspace = true }
+ring = { workspace = true }
+base64 = { workspace = true }
 netgene-enterprise = { workspace = true }
 netgene-ebpf = { workspace = true }
 netgene-safeguard = { workspace = true }

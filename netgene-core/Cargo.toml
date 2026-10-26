@@ -17,10 +17,11 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.8.0"
+version = "0.9.0"
 edition = "2021"
 authors = ["NetGene OS contributors"]
 license = "MIT OR Apache-2.0"
+publish = false
 repository = "https://github.com/willan23/netgene-os"
 
 [workspace.dependencies]
@@ -39,7 +40,7 @@ hex = "0.4"
 base64 = "0.22"
 
 # Unique IDs
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "color", "env"] }
@@ -64,7 +65,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # HTTP client (for Ollama)
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
-# Persistence (sled embedded DB)
+# Legacy persistence (only for the opt-in sled-migration feature of netgene-store)
 sled = "0.34"
 
 # P2P networking (libp2p)
@@ -81,6 +82,11 @@ libp2p = { version = "0.57", features = [
     "macros",
     "request-response",
     "json",
+    "quic",
+    "relay",
+    "dcutr",
+    "autonat",
+    "dns",
 ] }
 
 # Internal crates

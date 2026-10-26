@@ -30,11 +30,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fallback_optimize_network() {
+    async fn test_fallback_optimize_is_not_executable() {
         let e = engine();
         let intent = e.parse("optimize routes for 10 nodes").await.unwrap();
-        assert_eq!(intent.action, "optimize_network");
-        assert_eq!(intent.parameters["nodes"], 10);
+        assert_eq!(intent.action, "unknown");
+    }
+
+    #[tokio::test]
+    async fn test_fallback_agents() {
+        let e = engine();
+        assert_eq!(e.parse("list agents").await.unwrap().action, "list_agents");
+        let run = e.parse("run agent echo-bot with Hello World").await.unwrap();
+        assert_eq!(run.action, "run_agent");
+        assert_eq!(run.parameters["agent"], "echo-bot");
+        assert_eq!(run.parameters["input"], "Hello World");
     }
 
     #[tokio::test]
@@ -60,11 +69,4 @@ mod tests {
         assert_eq!(intent.parameters["count"], 2);
     }
 
-    #[tokio::test]
-    async fn test_fallback_route_optimization_without_count() {
-        let e = engine();
-        let intent = e.parse("quantum route optimization please").await.unwrap();
-        // quantum triggers optimize_network with default nodes=8
-        assert_eq!(intent.action, "optimize_network");
-    }
 }

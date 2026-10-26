@@ -22,11 +22,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: netgene-core
-      - run: cargo check --workspace --all-targets
+      - name: Linux toolchain (eBPF: clang + libbpf; SAML: libxml2 + xmlsec1)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang libbpf-dev libxml2-dev libxmlsec1-dev libxmlsec1-openssl libssl-dev
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
+      - name: SAML (optional feature, needs xmlsec)
+        if: runner.os == 'Linux'
+        run: cargo test -p netgene-enterprise --features saml
 
   audit:
     name: Security audit
@@ -39,6 +47,15 @@ jobs:
         working-directory: netgene-core
       - run: cargo audit
         working-directory: netgene-desktop/src-tauri
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: netgene-core/Cargo.toml
 
   desktop:
     name: Desktop (windows)
@@ -61,3 +78,10 @@ jobs:
           workspaces: netgene-desktop/src-tauri
       - run: cargo check
         working-directory: netgene-desktop/src-tauri
+
+  mesh:
+    name: Multi-node mesh (Docker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash deploy/mesh-test/run.sh

@@ -4,11 +4,13 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+publish.workspace = true
 description = "NetGene Store — redb-based persistence layer with CRDT state synchronization"
 
 [features]
-default = ["sled-migration"]
+default = []
 # One-time import of databases written by NetGene <= 0.6 (sled backend).
+# Off by default: sled is unmaintained and pulls unmaintained dependencies.
 sled-migration = ["dep:sled"]
 
 [dependencies]

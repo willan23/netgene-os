@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+publish.workspace = true
 description = "NetGene WASM — signed WebAssembly module sandbox"
 
 [dependencies]
@@ -16,7 +17,10 @@ uuid = { workspace = true }
 base64 = { workspace = true }
 sha3 = { workspace = true }
 netgene-gene = { workspace = true }
-wasmtime = { version = "36.0.19", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime = { version = "36.0.19", default-features = false, features = ["cranelift", "runtime", "std", "component-model"] }
 
 [dev-dependencies]
 wat = "1"
+# Turn test core modules into components (same wasm-tools release as wasmtime 36).
+wit-component = "0.236"
+wit-parser = "0.236"

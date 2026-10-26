@@ -1,4 +1,4 @@
-use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel, marketplace::{Marketplace, AgentManifest}};
+use netgene_kernel::{DispatchOutcome, KernelConfig, NetSphereKernel, Workspace, marketplace::{Marketplace, AgentManifest}};
 use netgene_policy::{AuditEntry, Policy};
 use netgene_presence::PresenceEnrollment;
 use netgene_kernel::reputation::{Reputation, ReviewStore};
@@ -93,23 +93,25 @@ fn netgene_home() -> std::path::PathBuf {
 
 /// The first Master Gene whose key is in the OS keystore, else a throw-away one.
 /// Also returns the operator's presence enrolment, if any.
-fn kernel_config(netgene_dir: &std::path::Path) -> anyhow::Result<(KernelConfig, Option<PresenceEnrollment>)> {
+fn kernel_config(netgene_dir: &std::path::Path, store: NetGeneStore) -> anyhow::Result<(KernelConfig, Option<PresenceEnrollment>)> {
     let policy = Policy::load_or_default(&netgene_dir.join("policy.json"))?;
     let audit_path = Some(netgene_dir.join("audit.jsonl"));
     let gene_dir = default_gene_dir();
-    let secrets = netgene_gene::default_store()?;
+    let secrets: Arc<dyn netgene_gene::SecretStore> = Arc::from(netgene_gene::default_store()?);
+    let workspace = Workspace::at(netgene_dir, gene_dir.clone(), secrets.clone(), store);
     let master = netgene_gene::storage::list_genes(&gene_dir)?
         .into_iter()
         .filter(|g| g.role == netgene_gene::GeneRole::Master)
-        .find_map(|g| load_gene(&g.id.to_string(), &gene_dir, &secrets).ok());
+        .find_map(|g| load_gene(&g.id.to_string(), &gene_dir, secrets.as_ref()).ok());
 
     Ok(match master {
         Some((operator, operator_kp)) => {
             let enrollment = PresenceEnrollment::load(&netgene_dir.join("presence"), operator.id)?;
             let presence_key = enrollment.as_ref().map(|e| e.public_key()).transpose()?;
-            (KernelConfig { operator, operator_kp, policy, audit_path, grants: vec![], presence_key }, enrollment)
+            let passkeys = netgene_presence::webauthn::load_passkeys(&netgene_dir.join("presence"), operator.id)?;
+            (KernelConfig { operator, operator_kp, policy, audit_path, grants: vec![], presence_key, passkeys, workspace }, enrollment)
         }
-        None => (KernelConfig { policy, audit_path, ..KernelConfig::ephemeral()? }, None),
+        None => (KernelConfig { policy, audit_path, workspace, ..KernelConfig::ephemeral()? }, None),
     })
 }
 
@@ -301,11 +303,11 @@ pub fn run() {
             
             let store = NetGeneStore::open(None)
                 .expect("Failed to initialize NetGeneStore");
-            app.manage(store);
+            app.manage(store.clone());
 
             // Boot the kernel once, acting as the local Master Gene when one exists.
             let netgene_dir = netgene_home();
-            let (config, presence) = kernel_config(&netgene_dir).expect("Failed to load kernel configuration");
+            let (config, presence) = kernel_config(&netgene_dir, store).expect("Failed to load kernel configuration");
             app.manage(presence);
             let kernel = tauri::async_runtime::block_on(async {
                 NetSphereKernel::boot_with(config).await.expect("Failed to boot NetSphereKernel")

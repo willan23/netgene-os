@@ -72,6 +72,24 @@ pub enum GeneCommand {
         #[arg(long)]
         gene: String,
     },
+    /// Enrol a WebAuthn passkey (this device or a phone) as a presence factor
+    EnrollPasskey {
+        #[arg(long)]
+        gene: String,
+    },
+    /// Grant capabilities from a SAML 2.0 response (mapping in ~/.netgene/saml.json)
+    #[cfg(feature = "saml")]
+    GrantSaml {
+        /// Issuing gene (the subject's parent, normally the Master Gene)
+        #[arg(long)]
+        issuer: String,
+        /// Gene that receives the capabilities
+        #[arg(long)]
+        subject: String,
+        /// Base64 SAMLResponse (HTTP-POST binding), or @path to a file containing it
+        #[arg(long)]
+        response: String,
+    },
     /// Grant capabilities from a corporate OIDC ID token (mapping in ~/.netgene/enterprise.json)
     GrantOidc {
         /// Issuing gene (the subject's parent, normally the Master Gene)
@@ -274,54 +292,67 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
             println!("   Set \"require_user_presence\": true in ~/.netgene/policy.json to require it for confirmations.");
         }
 
+        GeneCommand::EnrollPasskey { gene } => {
+            use netgene_presence::webauthn;
+            let gene = list_genes(&dir)?
+                .into_iter()
+                .find(|g| g.id.to_string() == gene)
+                .ok_or_else(|| anyhow::anyhow!("Gene {} not found", gene))?;
+            let mut challenge = [0u8; 32];
+            ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut challenge).map_err(|_| anyhow::anyhow!("RNG failure"))?;
+
+            let ceremony = super::passkey::Ceremony::bind().await?;
+            let origin = ceremony.origin();
+            let options = webauthn::creation_options(gene.id, &gene.name, &challenge, webauthn::LOCAL_RP_ID);
+            let answer = ceremony.run(super::passkey::Mode::Create, options, &format!("Create a passkey for gene {}", gene.name)).await?;
+            let response: webauthn::RegistrationResponse = serde_json::from_value(answer)?;
+            let credential = webauthn::verify_registration(gene.id, &response, &challenge, webauthn::LOCAL_RP_ID, &origin)?;
+
+            let mut passkeys = webauthn::load_passkeys(&grants::presence_dir(), gene.id)?;
+            passkeys.retain(|p| p.credential_id_b64 != credential.credential_id_b64);
+            passkeys.push(credential.clone());
+            webauthn::save_passkeys(&grants::presence_dir(), gene.id, &passkeys)?;
+            println!("✅ Passkey enrolled for {} (COSE alg {}, {} passkey(s) in total)", gene.name, credential.alg, passkeys.len());
+            println!("   Approve with `agent dispatch … --confirm --passkey`; set \"require_user_presence\": true to make it mandatory.");
+        }
+
         GeneCommand::GrantOidc { issuer, subject, id_token } => {
             let config = netgene_enterprise::OidcConfig::load(&grants::netgene_home().join("enterprise.json"))?;
             let token = match id_token.strip_prefix('@') {
                 Some(path) => std::fs::read_to_string(path)?,
                 None => id_token,
             };
-            let jwks = netgene_enterprise::JwkSet::load(&config.jwks).await?;
+            let cache = netgene_enterprise::JwksCache::new(grants::netgene_home().join("jwks-cache.json"));
             let now = chrono::Utc::now();
-            let identity = netgene_enterprise::verify_id_token(&config, &jwks, &token, now)?;
+            let identity = cache.verify(&config, token.trim(), now, netgene_enterprise::JwkSet::fetch).await?;
             let caps = netgene_enterprise::capabilities_for(&config, &identity);
             if caps.is_empty() {
                 anyhow::bail!("ID token for {} has no role mapped to NetGene capabilities", identity.subject);
             }
 
-            let (issuer_gene, issuer_kp) = load_gene(&issuer, &dir, &secrets)?;
-            let subject_gene = list_genes(&dir)?
-                .into_iter()
-                .find(|g| g.id.to_string() == subject)
-                .ok_or_else(|| anyhow::anyhow!("Subject gene {} not found", subject))?;
-            if !subject_gene.verify_lineage(&issuer_gene) {
-                anyhow::bail!("Only the verified parent of a gene can grant it capabilities");
-            }
             let ttl = netgene_enterprise::grant_ttl(&config, &identity, now);
-            let token = CapabilityToken::issue(&issuer_gene, &issuer_kp, &subject_gene, caps, ttl)?;
-            std::fs::create_dir_all(grants::tokens_dir())?;
-            std::fs::write(grants::tokens_dir().join(format!("{}.json", token.claims.token_id)), serde_json::to_string_pretty(&token)?)?;
+            grant_from_identity(&dir, secrets.as_ref(), &issuer, &subject, &identity, caps, ttl, "oidc", &config.issuer)?;
+        }
 
-            // Record who the capabilities came from in the audit log.
-            let mut audit = netgene_policy::AuditLog::open(grants::netgene_home().join("audit.jsonl"), issuer_kp.try_clone()?)?;
-            audit.append(netgene_policy::AuditRecord {
-                actor_gene_id: issuer_gene.id.to_string(),
-                input: format!("oidc grant for {}", identity.email.clone().unwrap_or_else(|| identity.subject.clone())),
-                action: Some("gene.grant".into()),
-                params: serde_json::json!({
-                    "token_id": token.claims.token_id,
-                    "subject_gene": subject_gene.id,
-                    "oidc_issuer": config.issuer,
-                    "oidc_subject": identity.subject,
-                    "roles": identity.roles,
-                    "capabilities": token.claims.capabilities,
-                }),
-                decision: "granted".into(),
-                detail: format!("expires {}", token.claims.expires_at),
-            })?;
-
-            println!("🏢 {} ({}) verified by {}", identity.email.as_deref().unwrap_or("-"), identity.subject, config.issuer);
-            println!("🎫 Token {} → {} [{}] until {}", token.claims.token_id, subject_gene.name,
-                token.claims.capabilities.join(", "), token.claims.expires_at.format("%Y-%m-%d %H:%M UTC"));
+        #[cfg(feature = "saml")]
+        GeneCommand::GrantSaml { issuer, subject, response } => {
+            use netgene_enterprise::saml;
+            let config = saml::SamlConfig::load(&grants::netgene_home().join("saml.json"))?;
+            let metadata = std::fs::read_to_string(&config.idp_metadata)
+                .map_err(|e| anyhow::anyhow!("Cannot read IdP metadata {}: {}", config.idp_metadata.display(), e))?;
+            let response = match response.strip_prefix('@') {
+                Some(path) => std::fs::read_to_string(path)?,
+                None => response,
+            };
+            let mut replay = saml::ReplayCache::open(grants::netgene_home().join("saml-replay.json"))?;
+            let now = chrono::Utc::now();
+            let identity = saml::verify_saml_response(&config, &metadata, &response, &mut replay, now)?;
+            let caps = saml::saml_capabilities_for(&config, &identity);
+            if caps.is_empty() {
+                anyhow::bail!("SAML assertion for {} has no role mapped to NetGene capabilities", identity.subject);
+            }
+            let ttl = saml::saml_grant_ttl(&config, &identity, now);
+            grant_from_identity(&dir, secrets.as_ref(), &issuer, &subject, &identity, caps, ttl, "saml", &config.sp_entity_id)?;
         }
 
         GeneCommand::Import { file } => {
@@ -338,5 +369,55 @@ pub async fn run(cmd: GeneCommand, json: bool) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Issue a capability token to `subject` from a verified corporate identity and audit it.
+#[allow(clippy::too_many_arguments)]
+fn grant_from_identity(
+    dir: &std::path::Path,
+    secrets: &dyn netgene_gene::SecretStore,
+    issuer: &str,
+    subject: &str,
+    identity: &netgene_enterprise::VerifiedIdentity,
+    caps: Vec<String>,
+    ttl: chrono::Duration,
+    protocol: &str,
+    source: &str,
+) -> Result<()> {
+    let (issuer_gene, issuer_kp) = load_gene(issuer, dir, secrets)?;
+    let subject_gene = list_genes(dir)?
+        .into_iter()
+        .find(|g| g.id.to_string() == subject)
+        .ok_or_else(|| anyhow::anyhow!("Subject gene {} not found", subject))?;
+    if !subject_gene.verify_lineage(&issuer_gene) {
+        anyhow::bail!("Only the verified parent of a gene can grant it capabilities");
+    }
+    let token = CapabilityToken::issue(&issuer_gene, &issuer_kp, &subject_gene, caps, ttl)?;
+    std::fs::create_dir_all(grants::tokens_dir())?;
+    std::fs::write(grants::tokens_dir().join(format!("{}.json", token.claims.token_id)), serde_json::to_string_pretty(&token)?)?;
+
+    // Record who the capabilities came from in the audit log.
+    let mut audit = netgene_policy::AuditLog::open(grants::netgene_home().join("audit.jsonl"), issuer_kp.try_clone()?)?;
+    audit.append(netgene_policy::AuditRecord {
+        actor_gene_id: issuer_gene.id.to_string(),
+        input: format!("{} grant for {}", protocol, identity.email.clone().unwrap_or_else(|| identity.subject.clone())),
+        action: Some("gene.grant".into()),
+        params: serde_json::json!({
+            "token_id": token.claims.token_id,
+            "subject_gene": subject_gene.id,
+            "protocol": protocol,
+            "identity_source": source,
+            "identity_subject": identity.subject,
+            "roles": identity.roles,
+            "capabilities": token.claims.capabilities,
+        }),
+        decision: "granted".into(),
+        detail: format!("expires {}", token.claims.expires_at),
+    })?;
+
+    println!("🏢 {} ({}) verified by {} ({})", identity.email.as_deref().unwrap_or("-"), identity.subject, source, protocol);
+    println!("🎫 Token {} → {} [{}] until {}", token.claims.token_id, subject_gene.name,
+        token.claims.capabilities.join(", "), token.claims.expires_at.format("%Y-%m-%d %H:%M UTC"));
     Ok(())
 }
